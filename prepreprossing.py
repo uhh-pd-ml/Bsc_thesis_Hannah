@@ -56,64 +56,63 @@ jet_kinematics = np.zeros((n_pf, 14), np.float64)
 
 
 # In[9]:
-
 vector.register_awkward()
 jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 1.0)
-for i in range(n_pf):
-    if (i%1000==0):
-        print('> computed ' + str(i) + ' events')
-    
-    event = events_combined[i]
-    pts, etas, phis = [], [], []
-    for j in range(700):
-        pT  = event[j * 3]
-        eta = event[j * 3 + 1]
-        phi = event[j * 3 + 2]
-        if pT > 0:
-            pts.append(pT)
-            etas.append(eta)
-            phis.append(phi)
 
-    # Awkward Array with pt/eta/phi/M 
+events_np = np.asarray(events_combined)
+
+for i in range(len(events_np)):
+    if i % 1000 == 0:
+        print(f'> computed {i} events')
+
+    event = events_np[i, :700*3].reshape(700, 3)
+    mask  = event[:, 0] > 0
+    pts   = event[mask, 0]
+    etas  = event[mask, 1]
+    phis  = event[mask, 2]
+
     array = ak.Array(
-        {"pt": pts, "eta": etas, "phi": phis, "M": [0.0] * len(pts)},
+        {"pt": pts, "eta": etas, "phi": phis, "M": np.zeros(len(pts))},
         with_name="Momentum4D",
     )
 
-    # Clustering
-    cluster = fastjet.ClusterSequence(array, jetdef)
-    jets = cluster.inclusive_jets(min_pt=0)          
-    jets = jets[ak.argsort(jets.pt, ascending=False)] #pT sort
+    #Clustering
+    cluster    = fastjet.ClusterSequence(array, jetdef)
+    jets       = cluster.inclusive_jets(min_pt=0)
+    jets   = jets[ak.argsort(jets.pt, ascending=False)]
+    
 
+    n_jets      = len(jets)
+    n_jets_save = min(n_jets, 3)
 
-    if len(jets) > 1:
-        E = jets[0].energy + jets[1].energy
+    #mjj
+    if n_jets > 1:
+        E  = jets[0].energy + jets[1].energy
         px = jets[0].px + jets[1].px
         py = jets[0].py + jets[1].py
         pz = jets[0].pz + jets[1].pz
-        jet_kinematics[i, 0] = (E**2-px**2-py**2-pz**2)**0.5  # calculate mjj
-    
-    n_jets_save = np.min([len(jets), 3])  # save values for the first 3 jets if 3 jets exist
+        jet_kinematics[i, 0] = np.sqrt(max(E**2 - px**2 - py**2 - pz**2, 0.0))
+
+    #Jet kinematics + PF candidates
+
     for j in range(n_jets_save):
-        vec = np.array([jets[j].pt, jets[j].eta, jets[j].phi, jets[j].mass])  # the 4 vector of the jet
-        jet_kinematics[i, 2+j*4 : 2+(j+1)*4] = vec
-        
+        jet = jets[j]
+        jet_kinematics[i, 2+j*4 : 2+(j+1)*4] = (jet.pt, jet.eta, jet.phi, jet.mass)
+
         if j < 2:
             consts = cluster.constituents()[j]
-            
-            pf_cands = np.array([
+            pf_cands = np.stack([
                 ak.to_numpy(consts.pt),
                 ak.to_numpy(consts.eta),
                 ak.to_numpy(consts.phi)
-            ]).T.flatten()  # shape: (N*3,)
+            ], axis=1).ravel()
 
             len_pf = min(len(pf_cands), 300)
-
-            # insert the PFCands in the j1pf or j2pf array
             if j == 0:
                 j1pf[i, :len_pf] = pf_cands[:len_pf]
-            if j == 1:
+            else:
                 j2pf[i, :len_pf] = pf_cands[:len_pf]
+
 
 # In[10]:
 
