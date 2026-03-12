@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
 import h5py    
 import numpy as np 
 #from pyjet import cluster,DTYPE_PTEPM
@@ -10,40 +9,18 @@ import pandas as pd
 import awkward as ak
 import vector
 
-# In[2]:
 
 signal_region = (3150, 3850)
-
-
-# In[3]:
 
 
 out_names = ['/beegfs/u/bbd1146/daten/events_b_br.h5', '/beegfs/u/bbd1146/daten/events_b_sr.h5', '/beegfs/u/bbd1146/daten/events_s_br.h5', '/beegfs/u/bbd1146/daten/events_s_sr.h5']
 
 
-# In[4]:
-
 fnew = pd.read_hdf("/beegfs/u/bbd1146/daten/events_anomalydetection.h5")
 
-# In[5]:
-
-
-events_combined = fnew.T
-
-
-# In[6]:
-
-
-np.shape(events_combined)
-
-
-# In[7]:
-
-
-n_pf = np.shape(events_combined)[1]
-
-
-# In[8]:
+events_combined = fnew 
+events_np = np.asarray(events_combined)
+n_pf = fnew.shape[0]  
 
 
 # Create arrays for the PFCands for the first and the second jet
@@ -60,6 +37,11 @@ vector.register_awkward()
 jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 1.0)
 
 events_np = np.asarray(events_combined)
+
+print(fnew.shape)
+print(events_combined.shape)
+print(events_np.shape)
+
 
 for i in range(len(events_np)):
     if i % 1000 == 0:
@@ -79,7 +61,8 @@ for i in range(len(events_np)):
     #Clustering
     cluster    = fastjet.ClusterSequence(array, jetdef)
     jets       = cluster.inclusive_jets(min_pt=0)
-    jets   = jets[ak.argsort(jets.pt, ascending=False)]
+    sort_idx   = ak.argsort(jets.pt, ascending=False)
+    jets, all_consts = jets[sort_idx], cluster.constituents()[sort_idx]
     
 
     n_jets      = len(jets)
@@ -100,7 +83,7 @@ for i in range(len(events_np)):
         jet_kinematics[i, 2+j*4 : 2+(j+1)*4] = (jet.pt, jet.eta, jet.phi, jet.mass)
 
         if j < 2:
-            consts = cluster.constituents()[j]
+            consts = all_consts[j]
             pf_cands = np.stack([
                 ak.to_numpy(consts.pt),
                 ak.to_numpy(consts.eta),
