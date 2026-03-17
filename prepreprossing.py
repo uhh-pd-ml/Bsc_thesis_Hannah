@@ -5,6 +5,7 @@ import h5py
 import numpy as np 
 #from pyjet import cluster,DTYPE_PTEPM
 import fastjet
+import fastjet.contrib as fjcontrib
 import pandas as pd
 import awkward as ak
 import vector
@@ -36,12 +37,18 @@ jet_kinematics = np.zeros((n_pf, 14), np.float64)
 vector.register_awkward()
 jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 1.0)
 
+
+
+# These two are needed - measure and axis definition (standard choices, CMS uses this)
+measure_definition = fjcontrib.NormalizedMeasure(beta=1.0, R0=jetdef.R())
+axes_definition    = fjcontrib.OnePass_KT_Axes()
+# define Njettiness object
+njettiness = fjcontrib.Njettiness(axes_definition, measure_definition)
+jettiness_features = np.zeros((n_pf, 8), np.float32)
+
+
+
 events_np = np.asarray(events_combined)
-
-print(fnew.shape)
-print(events_combined.shape)
-print(events_np.shape)
-
 
 for i in range(len(events_np)):
     if i % 1000 == 0:
@@ -64,6 +71,18 @@ for i in range(len(events_np)):
     sort_idx   = ak.argsort(jets.pt, ascending=False)
     jets, all_consts = jets[sort_idx], cluster.constituents()[sort_idx]
     
+    jettiness_features[i, 0] = njettiness.getTau(1, array)
+    jettiness_features[i, 1] = njettiness.getTau(2, array)
+    jettiness_features[i, 2] = njettiness.getTau(3, array)
+    jettiness_features[i, 3] = njettiness.getTau(4, array)
+
+    if len(all_consts) > 0:
+        jet0_consts = all_consts[0]
+        jettiness_features[i, 4] = njettiness.getTau(1, jet0_consts)
+        jettiness_features[i, 5] = njettiness.getTau(2, jet0_consts)
+        jettiness_features[i, 6] = njettiness.getTau(3, jet0_consts)
+        jettiness_features[i, 7] = njettiness.getTau(4, jet0_consts)
+
 
     n_jets      = len(jets)
     n_jets_save = min(n_jets, 3)
@@ -178,7 +197,10 @@ for i in range(len(groups)):
     jet_kinematics_i = jet_kinematics_i[orders[i]]
     out_files[i].create_dataset('jet_kinematics', data = jet_kinematics_i, chunks = (np.min([n_ev_gr[i], 1000]), 14), compression = 'gzip')
 
-
+    # Order: [tau1_glob, tau2_glob, tau3_glob, tau4_glob, tau1_j0, tau2_j0, tau3_j0, tau4_j0]
+    jettiness_i = jettiness_features[groups[i]]
+    jettiness_i = jettiness_i[orders[i]]
+    out_files[i].create_dataset('jettiness', data = jettiness_i, compression = 'gzip')
 # In[18]:
 
 
