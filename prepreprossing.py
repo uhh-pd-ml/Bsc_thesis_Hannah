@@ -5,7 +5,6 @@ import h5py
 import numpy as np 
 #from pyjet import cluster,DTYPE_PTEPM
 import fastjet
-import fastjet.contrib as fjcontrib
 import pandas as pd
 import awkward as ak
 import vector
@@ -37,15 +36,8 @@ jet_kinematics = np.zeros((n_pf, 14), np.float64)
 vector.register_awkward()
 jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 1.0)
 
-
-
-# These two are needed - measure and axis definition (standard choices, CMS uses this)
-measure_definition = fjcontrib.NormalizedMeasure(beta=1.0, R0=jetdef.R())
-axes_definition    = fjcontrib.OnePass_KT_Axes()
-# define Njettiness object
-njettiness = fjcontrib.Njettiness(axes_definition, measure_definition)
+# Array for 4 global Taus and 4 Sub-jettiness Taus of Jet 0
 jettiness_features = np.zeros((n_pf, 8), np.float32)
-
 
 
 events_np = np.asarray(events_combined)
@@ -71,21 +63,23 @@ for i in range(len(events_np)):
     sort_idx   = ak.argsort(jets.pt, ascending=False)
     jets, all_consts = jets[sort_idx], cluster.constituents()[sort_idx]
     
-    jettiness_features[i, 0] = njettiness.getTau(1, array)
-    jettiness_features[i, 1] = njettiness.getTau(2, array)
-    jettiness_features[i, 2] = njettiness.getTau(3, array)
-    jettiness_features[i, 3] = njettiness.getTau(4, array)
-
-    if len(all_consts) > 0:
-        jet0_consts = all_consts[0]
-        jettiness_features[i, 4] = njettiness.getTau(1, jet0_consts)
-        jettiness_features[i, 5] = njettiness.getTau(2, jet0_consts)
-        jettiness_features[i, 6] = njettiness.getTau(3, jet0_consts)
-        jettiness_features[i, 7] = njettiness.getTau(4, jet0_consts)
-
-
     n_jets      = len(jets)
     n_jets_save = min(n_jets, 3)
+
+    #jettiness
+    taus_global = cluster.njettiness(njets=[1, 2, 3, 4], R0=1.0)
+    jettiness_features[i, 0:4] = taus_global
+    if n_jets > 0:
+        c0 = all_consts[0]
+        jet0_consts = ak.Array({
+            "pt": c0.pt,
+            "eta": c0.eta,
+            "phi": c0.phi,
+            "M": np.zeros(len(c0.pt))
+        }, with_name="Momentum4D")
+        cluster_sub = fastjet.ClusterSequence(jet0_consts, jetdef)
+        taus_sub = cluster_sub.njettiness(njets=[1, 2, 3, 4], R0=1.0)
+        jettiness_features[i, 4:8] = taus_sub
 
     #mjj
     if n_jets > 1:
@@ -95,8 +89,8 @@ for i in range(len(events_np)):
         pz = jets[0].pz + jets[1].pz
         jet_kinematics[i, 0] = np.sqrt(max(E**2 - px**2 - py**2 - pz**2, 0.0))
 
-    #Jet kinematics + PF candidates
 
+    #Jet kinematics + PF candidates
     for j in range(n_jets_save):
         jet = jets[j]
         jet_kinematics[i, 2+j*4 : 2+(j+1)*4] = (jet.pt, jet.eta, jet.phi, jet.mass)
