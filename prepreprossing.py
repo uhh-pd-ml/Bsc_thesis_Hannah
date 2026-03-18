@@ -3,7 +3,6 @@
 
 import h5py    
 import numpy as np 
-#from pyjet import cluster,DTYPE_PTEPM
 import fastjet
 import pandas as pd
 import awkward as ak
@@ -32,7 +31,6 @@ j2pf = np.zeros((n_pf, 300), np.float16)
 jet_kinematics = np.zeros((n_pf, 14), np.float64)
 
 
-# In[9]:
 vector.register_awkward()
 jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 1.0)
 
@@ -110,20 +108,18 @@ for i in range(len(events_np)):
                 j2pf[i, :len_pf] = pf_cands[:len_pf]
 
 
-# In[10]:
 
 
 jet_kinematics[:, 1] = np.abs(jet_kinematics[:, 3] - jet_kinematics[:, 7])  # calculate Delta eta
 
 
-# In[11]:
+
 
 
 issignal = np.zeros((n_pf, 1), dtype = np.int8)
 issignal[:, 0] = fnew.iloc[:, 2100]
 
 
-# In[12]:
 
 
 groups = []
@@ -135,7 +131,7 @@ groups.append(((jet_kinematics[:, 0] < signal_region[0]) | (jet_kinematics[:, 0]
 groups.append((jet_kinematics[:, 0] >= signal_region[0]) & (jet_kinematics[:, 0] <= signal_region[1]) & issignal.reshape(-1))  # S in SR
 
 
-# In[13]:
+
 
 
 groups = np.array(groups, dtype = np.bool)
@@ -143,13 +139,12 @@ if ((groups.sum(0) != 1).sum()) != 0:
     raise AssertionError('Some elements are in no or more than one group')
 
 
-# In[14]:
 
 
 n_ev_gr = groups.sum(1)  # number of events in each group
 
 
-# In[15]:
+
 
 
 orders = []
@@ -162,7 +157,7 @@ for i in range(len(groups)):
         np.save(f_order, order)
 
 
-# In[16]:
+
 
 
 # open the files
@@ -171,7 +166,7 @@ for name in out_names:
     out_files.append(h5py.File(name, 'w'))
 
 
-# In[17]:
+
 
 
 for i in range(len(groups)):
@@ -195,7 +190,7 @@ for i in range(len(groups)):
     jettiness_i = jettiness_features[groups[i]]
     jettiness_i = jettiness_i[orders[i]]
     out_files[i].create_dataset('jettiness', data = jettiness_i, compression = 'gzip')
-# In[18]:
+
 
 
 for out_file in out_files:
