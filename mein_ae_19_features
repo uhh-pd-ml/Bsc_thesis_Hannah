@@ -1,0 +1,35 @@
+// Autoencoder Architecture
+digraph {
+	graph [rankdir=LR]
+	node [color=lightgrey fontname=Helvetica fontsize=12 shape=box style=filled]
+	edge [fontname=Helvetica fontsize=10]
+	input [label="Input
+(19 Features)" color="#a1d99b" shape=ellipse]
+	layer_0 [label="Layer 1
+(19 → 12)
++ ReLU" color="#bebada"]
+	layer_1 [label="Layer 2
+(12 → 6)
++ ReLU" color="#bebada"]
+	layer_2 [label="Bottleneck
+(Latent Space)
+(6 → 2)" color="#fdb462"]
+	layer_3 [label="Layer 4
+(2 → 6)
++ ReLU" color="#80b1d3"]
+	layer_4 [label="Layer 5
+(6 → 12)
++ ReLU" color="#80b1d3"]
+	layer_5 [label="Layer 6
+(12 → 19)" color="#80b1d3"]
+	output [label="Output
+(Rekonstruktion)
+(19 Features)" color="#fb8072" shape=ellipse]
+	input -> layer_0
+	layer_0 -> layer_1
+	layer_1 -> layer_2
+	layer_2 -> layer_3
+	layer_3 -> layer_4
+	layer_4 -> layer_5
+	layer_5 -> output
+}
