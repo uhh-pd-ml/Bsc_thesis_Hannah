@@ -13,4 +13,4 @@
 
 module load python
 source /usw/u/bbd1146/my_venv/bin/activate
-python prepreprossing.py
+python preprocessing.py

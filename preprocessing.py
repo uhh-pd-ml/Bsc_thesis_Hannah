@@ -34,9 +34,8 @@ jet_kinematics = np.zeros((n_pf, 14), np.float64)
 vector.register_awkward()
 jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 1.0)
 
-# Array for 4 global Taus and 4 Sub-jettiness Taus of Jet 0
-jettiness_features = np.zeros((n_pf, 8), np.float32)
-
+# Array 4 Global, 4 subjettiness Jet 1 and 4 subjettiness Jet 2
+jettiness_features = np.zeros((n_pf, 12), np.float32)
 
 events_np = np.asarray(events_combined)
 
@@ -64,9 +63,11 @@ for i in range(len(events_np)):
     n_jets      = len(jets)
     n_jets_save = min(n_jets, 3)
 
-    #jettiness
+    # Global Jettiness
     taus_global = cluster.njettiness(njets=[1, 2, 3, 4], R0=1.0)
     jettiness_features[i, 0:4] = taus_global
+
+    # Sub-Jettiness Jet 1
     if n_jets > 0:
         c0 = all_consts[0]
         jet0_consts = ak.Array({
@@ -75,10 +76,23 @@ for i in range(len(events_np)):
             "phi": c0.phi,
             "M": np.zeros(len(c0.pt))
         }, with_name="Momentum4D")
-        cluster_sub = fastjet.ClusterSequence(jet0_consts, jetdef)
-        taus_sub = cluster_sub.njettiness(njets=[1, 2, 3, 4], R0=1.0)
-        jettiness_features[i, 4:8] = taus_sub
+        cluster_sub0 = fastjet.ClusterSequence(jet0_consts, jetdef)
+        taus_sub0 = cluster_sub0.njettiness(njets=[1, 2, 3, 4], R0=1.0)
+        jettiness_features[i, 4:8] = taus_sub0
 
+    # Sub-Jettiness Jet 2
+    if n_jets > 1:
+        c1 = all_consts[1]
+        jet1_consts = ak.Array({
+            "pt": c1.pt,
+            "eta": c1.eta,
+            "phi": c1.phi,
+            "M": np.zeros(len(c1.pt))
+        }, with_name="Momentum4D")
+        cluster_sub1 = fastjet.ClusterSequence(jet1_consts, jetdef)
+        taus_sub1 = cluster_sub1.njettiness(njets=[1, 2, 3, 4], R0=1.0)
+        jettiness_features[i, 8:12] = taus_sub1
+    
     #mjj
     if n_jets > 1:
         E  = jets[0].energy + jets[1].energy
@@ -186,7 +200,7 @@ for i in range(len(groups)):
     jet_kinematics_i = jet_kinematics_i[orders[i]]
     out_files[i].create_dataset('jet_kinematics', data = jet_kinematics_i, chunks = (np.min([n_ev_gr[i], 1000]), 14), compression = 'gzip')
 
-    # Order: [tau1_glob, tau2_glob, tau3_glob, tau4_glob, tau1_j0, tau2_j0, tau3_j0, tau4_j0]
+    # Order: [4 tau_glob, 4 tau_sub jet1, 4 tau_sub jet2]
     jettiness_i = jettiness_features[groups[i]]
     jettiness_i = jettiness_i[orders[i]]
     out_files[i].create_dataset('jettiness', data = jettiness_i, compression = 'gzip')

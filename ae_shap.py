@@ -38,7 +38,7 @@ ae_model = Autoencoder(
     save_path="AE_models"
 )
 
-ae_model._load_model("AE_models/CLSF_epoch_49.par") 
+ae_model._load_model("trash_ae/mein_erster_ae/AE_models/CLSF_epoch_49.par") 
 ae_model.model.eval() 
 
 # 4. SHAP FUNKTION
@@ -51,7 +51,7 @@ def map_model_to_mse(x_np):
 
 # 5. SHAP AUSFÜHREN
 # Hintergrund-Daten vorbereiten
-X_train_ref = scaler.transform(X_train_raw[:100])
+X_train_ref = scaler.transform(X_train_raw[:1000])
 # Den Explainer erstellen
 explainer = shap.KernelExplainer(map_model_to_mse, X_train_ref)
 
@@ -60,5 +60,5 @@ shap_values = explainer.shap_values(X_s_scaled[:50])
 
 # 6. PLOT SPEICHERN
 plt.figure(figsize=(12, 8))
-shap.summary_plot(shap_values, X_s_scaled[:50], feature_names=feature_names, show=False)
+shap.summary_plot(shap_values, X_s_scaled[:50], feature_names=feature_names, plot_type="violin", show=False)
 plt.savefig("shap_summary.png", bbox_inches='tight')
