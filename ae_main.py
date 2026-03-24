@@ -15,11 +15,10 @@ X_train_raw = np.concatenate([kinematics, jettiness], axis=1)
 
 # Skalieren
 scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train_raw)[:2000]
+X_train = scaler.fit_transform(X_train_raw)
 
 # Indizes der Features, die wir behalten wollen (alle außer 4, 8, 12)
 #useful_indices = [i for i in range(22) if i not in [4, 8, 12]]
-
 #X_train_filtered = X_train[:, useful_indices]
 
 

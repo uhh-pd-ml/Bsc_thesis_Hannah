@@ -50,7 +50,7 @@ plt.savefig('first_ae/ROC_Kurve.png')
 
 
 
-#Learing courve
+#Learing curve
 train_losses = np.load("first_ae/CLSF_train_losses.npy")
 val_losses = np.load("first_ae/CLSF_val_losses.npy")
 
