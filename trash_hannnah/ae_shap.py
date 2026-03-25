@@ -3,7 +3,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import shap
-import os
 from sklearn.preprocessing import StandardScaler
 from ae_basis import Autoencoder
 
@@ -14,7 +13,8 @@ feature_names = [
     "Jet2_pT", "Jet2_Eta", "Jet2_Phi", "Jet2_Mass",  # Jet 2 (6, 7, 8, 9)
     "Jet3_pT", "Jet3_Eta", "Jet3_Phi", "Jet3_Mass",  # Jet 3 / Zusatz (10, 11, 12, 13)
     "Tau_Global_1", "Tau_Global_2", "Tau_Global_3","Tau_Global_4",  # Global Jettiness 
-    "Tau1", "Tau2", "Tau3", "Tau4"  # Substruktur 
+    "Tau1_jet1", "Tau2_jet1", "Tau3_jet1", "Tau4_jet1"  # Substruktur 
+    "Tau1_jet2", "Tau2_jet2", "Tau_jet2", "Tau4_jet2"  # Substruktur 
 ]
 
 # 2. DATEN LADEN & SKALIEREN
@@ -33,12 +33,12 @@ X_s_scaled = scaler.transform(X_s_raw)
 
 # 3. MODELL LADEN
 ae_model = Autoencoder(
-    n_inputs=22,
-    layers=[12, 6, 2, 6, 12, 22],
+    n_inputs=26,
+    layers=[18, 12, 6, 2, 6, 12, 18, 26],
     save_path="AE_models"
 )
 
-ae_model._load_model("trash_ae/mein_erster_ae/AE_models/CLSF_epoch_49.par") 
+ae_model._load_model("ae_data/AE_models/CLSF_epoch_49.par") 
 ae_model.model.eval() 
 
 # 4. SHAP FUNKTION
@@ -61,4 +61,4 @@ shap_values = explainer.shap_values(X_s_scaled[:50])
 # 6. PLOT SPEICHERN
 plt.figure(figsize=(12, 8))
 shap.summary_plot(shap_values, X_s_scaled[:50], feature_names=feature_names, plot_type="violin", show=False)
-plt.savefig("shap_summary.png", bbox_inches='tight')
+plt.savefig("ae_data/shap_summary.png", bbox_inches='tight')

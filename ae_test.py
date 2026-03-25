@@ -3,8 +3,8 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve
 
 # --- 1. DATEN LADEN ---
-score_background = np.load('trash_ae/first_ae_22Features/scores_bg.npy')
-score_signal = np.load('trash_ae/first_ae_22Features/scores_sig.npy')
+score_background = np.load('ae_data/scores_bg.npy')
+score_signal = np.load('ae_data/scores_sig.npy')
 
 
 all_scores = np.concatenate([score_background, score_signal])
@@ -42,7 +42,7 @@ plt.ylabel('Significance Improvement (SIC)')
 plt.legend()
 plt.grid(True, alpha=0.3)
 
-plt.savefig('sic.png')
+plt.savefig('ae_data/sic.png')
 
 print(f"Bester Schwellenwert: {optimal_threshold:.6f}")
 print(f"Dort erreicht man eine Signal-Effizienz von: {optimal_tpr*100:.2f}%")
