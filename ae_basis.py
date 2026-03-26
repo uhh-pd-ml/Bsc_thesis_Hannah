@@ -243,7 +243,7 @@ class Autoencoder(BaseEstimator):
                                  "not provided!")
             else:
                 X_train, X_val = train_test_split(
-                    X, test_size=self.val_split, shuffle=True)
+                    X, test_size=self.val_split, shuffle=True, random_state=42)
         else:
             X_train = X.copy()
 
@@ -259,13 +259,13 @@ class Autoencoder(BaseEstimator):
         # build data loader out of numpy arrays
 
         X_train_torch = torch.from_numpy(
-            X).type(torch.FloatTensor).to(self.device)
+            X_train).type(torch.FloatTensor).to(self.device)
         X_train_dataset = torch.utils.data.TensorDataset(X_train_torch)
         train_loader = torch.utils.data.DataLoader(
             X_train_dataset, batch_size=self.batch_size, shuffle=True)
 
         X_val_torch = torch.from_numpy(
-            X).type(torch.FloatTensor).to(self.device)
+            X_val).type(torch.FloatTensor).to(self.device)
         X_val_dataset = torch.utils.data.TensorDataset(X_val_torch)
         val_loader = torch.utils.data.DataLoader(
             X_val_dataset, batch_size=self.batch_size, shuffle=True)

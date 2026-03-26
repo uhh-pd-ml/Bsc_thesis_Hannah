@@ -96,12 +96,12 @@ X_s_scaled = scaler.transform(X_s_raw)
 
 # load model
 ae_model = Autoencoder(
-    n_inputs=26,
-    layers=[12, 6, 2, 6, 12, 26],
+    n_inputs=10,
+    layers=[8, 4, 2, 4, 8, 10],
     save_path="AE_models"
 )
 
-ae_model._load_model("ae_data/AE_models/CLSF_epoch_49.par") 
+ae_model._load_model("ae_data/AE_models/CLSF_epoch_36.par") 
 ae_model.model.eval() 
 
 # shap function
