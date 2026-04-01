@@ -1,11 +1,16 @@
+import os
+# Do this before importing Keras to use Torch PQLayers
+os.environ["KERAS_BACKEND"] = "torch"
+
+import torch
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 import h5py
 import numpy as np
-from ae_new import Autoencoder
-import torch
+from ae_qubasis import Autoencoder
 import random
+from pquant import dst_config
 
 def process_features(kinematics, jettiness, indices):
     X = np.concatenate([kinematics, jettiness], axis=1)[:, indices]
@@ -14,8 +19,6 @@ def process_features(kinematics, jettiness, indices):
     #dphi[dphi > np.pi] = 2 * np.pi - dphi[dphi > np.pi]
     #return np.concatenate([X, dphi.reshape(-1, 1)], axis=1)
     return X
-
-
 
 # Daten aus den H5-Files laden
 with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_br.h5', 'r') as f:
@@ -42,6 +45,19 @@ def set_seed(seed=42):
 
 set_seed(42)
 
+# config erstellen
+config = dst_config()
+config.training_parameters.epochs = 50
+config.training_parameters.fine_tuning_epochs = 50
+
+config.quantization_parameters.default_data_integer_bits = 3.0
+config.quantization_parameters.default_data_fractional_bits = 5.0
+config.quantization_parameters.default_weight_integer_bits = 0.0
+config.quantization_parameters.default_weight_fractional_bits = 7.0
+config.quantization_parameters.overflow_mode_data = "SAT"
+config.quantization_parameters.overflow_mode_parameters = "SAT"
+
+config.pruning_parameters.alpha = 5e-4
 
 # Architektur
 my_layers=[26, 18, 12, 2, 12, 18, 26]
@@ -49,6 +65,7 @@ my_layers=[26, 18, 12, 2, 12, 18, 26]
 
 
 ae_model = Autoencoder(
+    config=config,
     n_inputs=26,
     layers=my_layers,
     lr=0.001,
