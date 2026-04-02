@@ -51,13 +51,13 @@ config.training_parameters.epochs = 50
 config.training_parameters.fine_tuning_epochs = 50
 
 config.quantization_parameters.default_data_integer_bits = 3.0
-config.quantization_parameters.default_data_fractional_bits = 5.0
+config.quantization_parameters.default_data_fractional_bits = 7.0
 config.quantization_parameters.default_weight_integer_bits = 0.0
-config.quantization_parameters.default_weight_fractional_bits = 7.0
+config.quantization_parameters.default_weight_fractional_bits = 9.0
 config.quantization_parameters.overflow_mode_data = "SAT"
 config.quantization_parameters.overflow_mode_parameters = "SAT"
 
-config.pruning_parameters.alpha = 5e-4
+config.pruning_parameters.alpha = 5e-5
 
 # Architektur
 my_layers=[26, 18, 12, 2, 12, 18, 26]
@@ -110,3 +110,24 @@ print(f"Number of Background Events (SR): {len(X_b_sr_scaled)}")
 print(f"Number of Signal Events (SR):     {len(X_s_sr_scaled)}")
 print(f"MSE Background: {np.mean(score_background):.6f}")
 print(f"MSE Signal:     {np.mean(score_signal):.6f}")
+
+
+fig, ax = plt.subplots(2, 2, figsize=(12, 10))
+
+# Verlauf der verbleibenden Gewichte (Sparsity)
+ax[0, 0].plot(ae_model.history_keep_ratio, label="Remaining Weights %", color='blue')
+ax[0, 0].set_title("Weight Pruning Progress")
+ax[0, 0].legend()
+
+# Validierungs-Loss (MSE)
+ax[0, 1].plot(ae_model.history_val_loss, label="Val Loss (MSE)", color='orange')
+ax[0, 1].set_title("Reconstruction Error")
+ax[0, 1].legend()
+
+# EBOPs (Hardware-Effizienz)
+ax[1, 1].plot(ae_model.history_ebops, label="EBOPs", color='green')
+ax[1, 1].set_title("Estimated Bit Operations")
+ax[1, 1].legend()
+
+plt.tight_layout()
+plt.savefig('plots.png')

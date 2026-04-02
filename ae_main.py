@@ -3,7 +3,7 @@ from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
 import h5py
 import numpy as np
-from ae_new import Autoencoder
+from ae_basis import Autoencoder
 import torch
 import random
 

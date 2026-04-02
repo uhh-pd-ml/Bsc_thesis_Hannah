@@ -132,7 +132,23 @@ class Autoencoder(BaseEstimator):
         self.lr = lr
 
         self.model = QuantizedAutoencoderModel(config, layers=layers, n_inputs=n_inputs)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+
+        #self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        parameters = list(self.model.named_parameters())
+        threshold_params = [v for n, v in parameters if "threshold" in n and v.requires_grad]
+        rest_params = [v for n, v in parameters if "threshold" not in n and v.requires_grad]
+        self.optimizer = optim.Adam([
+            {
+                "params": threshold_params,
+                "weight_decay": 0,    # Absolut kein Weight Decay für Schwellenwerte!
+            },
+            {
+                "params": rest_params, 
+                "weight_decay": 1e-4  # Normales Weight Decay für Gewichte (optional)
+            }
+        ], lr=self.lr)
+
+
         self.loss = F.mse_loss
         self.no_gpu = no_gpu
         self.device = torch.device("cuda:0" if torch.cuda.is_available()
@@ -144,11 +160,16 @@ class Autoencoder(BaseEstimator):
         self.epochs = epochs
         self.verbose = verbose
 
-        self.model.to(self.device)
+        self.history_keep_ratio = []
+        self.history_val_loss = []
+        self.history_ebops = []
+        self.history_val_accuracy = []
 
+        self.model.to(self.device)
+        self.model(torch.randn(1, n_inputs).to(self.device))
         # defaulting to eval mode, switching to train mode in fit()
         self.model.eval()
-
+        
         self.load = load
 
         if load:
@@ -304,82 +325,98 @@ class Autoencoder(BaseEstimator):
         val_loader = torch.utils.data.DataLoader(
             X_val_dataset, batch_size=self.batch_size, shuffle=True)
 
-        # training loop
-        self.model.train()
-        for epoch in range(self.epochs if self.epochs is not None else 10000):
-            print('\nEpoch: {}'.format(epoch))
-            pbar = tqdm(total=len(train_loader.dataset))
-            epoch_train_loss = 0.
-            epoch_val_loss = 0.
+        
+        # --- 1. Definition der Hilfsfunktionen für PQuant ---
+        def pquant_train_step(model, trainloader, device, loss_function, optimizer, epoch, **kwargs):
+            model.train()
+            total_loss = 0
+            for i, batch in enumerate(trainloader):
+                batch_inputs = batch[0].to(device)
+                optimizer.zero_grad()
+                batch_outputs = model(batch_inputs)
+                
+                # Loss
+                recon_loss = loss_function(batch_outputs, batch_inputs)
+                pquant_loss = get_model_losses(model, torch.tensor(0.).to(device))
+                
+                loss = recon_loss + pquant_loss
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
+            return total_loss / len(trainloader)
 
-            for i, batch in enumerate(train_loader):
-
-                batch_inputs = batch[0]
-                batch_inputs = batch_inputs.to(self.device)
-
-                self.optimizer.zero_grad()
-                batch_outputs = self.model(batch_inputs)
-                reconstruction_loss = self.loss(batch_outputs, batch_inputs)
-                loss_2 = get_model_losses(self.model, torch.tensor(0.).to(self.device))
-                total_loss = reconstruction_loss + 0.01 * loss_2
-                total_loss.backward()
-                self.optimizer.step()
-                epoch_train_loss += total_loss.item()
-                if self.verbose:
-                    pbar.update(batch_inputs.size(0))
-                    pbar.set_description(
-                        "Train loss: {:.6f}".format(
-                            epoch_train_loss / (i + 1)))
-
-            epoch_train_loss /= (i + 1)
-            if self.verbose:
-                pbar.close()
-
+        def pquant_val_step(model, testloader, device, loss_function, epoch, **kwargs):
+            model.eval()
+            val_loss = 0
             with torch.no_grad():
-                self.model.eval()
-                for i, batch in enumerate(val_loader):
-
-                    batch_inputs = batch[0]
-                    batch_inputs = batch_inputs.to(self.device)
-                    batch_outputs = self.model(batch_inputs)
-
-                    recon_loss_val = self.loss(batch_outputs, batch_inputs)
-                    pquant_loss_val = get_model_losses(self.model, torch.tensor(0.).to(self.device))
-                    total_val_loss = recon_loss_val + 0.01 * pquant_loss_val
+                for i, batch in enumerate(testloader):
+                    batch_inputs = batch[0].to(device)
+                    outputs = model(batch_inputs)
+                    val_loss += loss_function(outputs, batch_inputs).item()
             
-                    epoch_val_loss += total_val_loss.item()
-                epoch_val_loss /= (i + 1)
-                current_ratio = get_layer_keep_ratio(self.model)
-                self.history_keep_ratio.append(current_ratio.item())
-            print(f"Validation loss: {epoch_val_loss:.6f} | Remaining Weights: {current_ratio:.2%}")
+            # Hier tracken wir die Sparsity (wie viel vom Modell noch "da" ist)
+            ratio = get_layer_keep_ratio(model).item()
+            self.history_keep_ratio.append(ratio)
+            if self.verbose:
+                print(f" [Epoch {epoch}] Val Loss: {val_loss/len(testloader):.6f} | Weights remaining: {ratio:.2%}")
+            return val_loss / len(testloader)
+        
+        def pquant_val_step(model, testloader, device, loss_function, epoch, **kwargs):
+            model.eval()
+            val_loss_sum = 0
+            from pquant import get_ebops # Tutorial-Metrik für Hardware-Effizienz
+            
+            with torch.no_grad():
+                for i, batch in enumerate(testloader):
+                    batch_inputs = batch[0].to(device)
+                    outputs = model(batch_inputs)
+                    loss = loss_function(outputs, batch_inputs)
+                    val_loss_sum += loss.item()
+            
+            avg_val_loss = val_loss_sum / len(testloader)
+            
+            # Statistiken sammeln (Tutorial Plot-Daten)
+            self.history_val_loss.append(avg_val_loss)
+            self.history_keep_ratio.append(get_layer_keep_ratio(model).item())
+            
+            # EBOPs (Estimated Bit Operations) - wichtig für FPGA-Metriken
+            try:
+                self.history_ebops.append(get_ebops(model).cpu().numpy())
+            except:
+                pass 
 
-            if epoch == 0:
-                train_losses = np.array([epoch_train_loss])
-                val_losses = np.array([epoch_val_loss])
-            else:
-                train_losses = np.concatenate(
-                    (train_losses, np.array([epoch_train_loss])))
-                val_losses = np.concatenate(
-                    (val_losses, np.array([epoch_val_loss])))
+            if self.verbose:
+                print(f"Epoch {epoch}: Val Loss {avg_val_loss:.6f} | Ratio {self.history_keep_ratio[-1]:.2%}")
+            
+            return avg_val_loss
+        
+        
+        # --- 2. Start des gesteuerten PQuant Trainings ---
+        from pquant import train_model, apply_final_compression
+        
+        print("Starting PQuant-managed training...")
+        train_model(
+            model=self.model,
+            config=self.config,
+            train_func=pquant_train_step,
+            valid_func=pquant_val_step,
+            trainloader=train_loader,
+            testloader=val_loader,
+            device=self.device,
+            loss_function=self.loss,
+            optimizer=self.optimizer,
+            input_shape=(self.n_inputs,),
+            gather_ebops=True
+        )
 
-            if self.save_path is not None:
-                np.save(self._train_loss_path(),
-                        train_losses)
-                np.save(self._val_loss_path(),
-                        val_losses)
-                self._save_model(self._model_path(epoch))
-
-            if self.early_stopping:
-                if epoch > self.patience:
-                    if np.all(val_losses[-self.patience:] >
-                              val_losses[-self.patience - 1]):
-                        print("Early stopping at epoch", epoch)
-                        break
-
+        # --- 3. Finalisierung: Gewichte permanent einfrieren ---
+        print("Applying final compression...")
+        apply_final_compression(self.model)
+        
         self.model.eval()
-        if self.save_path is not None:
-            print("Loading best model state...")
-            self.load_best_model()
+        #if self.save_path is not None:
+        #    print("Loading best model state...")
+        #    self.load_best_model()
 
         return self
 
