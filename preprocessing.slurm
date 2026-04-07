@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=prepreprocessing
-#SBATCH --output=/beegfs/u/bbd1146/prepreprocessing_output%J.log
-#SBATCH --error=/beegfs/u/bbd1146/prepreprocessing_error%J.log
-#SBATCH --time=12:00:00
+#SBATCH --job-name=hummel_run
+#SBATCH --output=/beegfs/u/bbd1146/hummel_output%J.log
+#SBATCH --error=/beegfs/u/bbd1146/hummel_error%J.log
+#SBATCH --time=3:00:00
 #SBATCH --partition=std
 #SBATCH --cpus-per-task=16
 #SBATCH --mail-type=all
@@ -12,5 +12,5 @@
 
 
 module load python
-source /usw/u/bbd1146/my_venv/bin/activate
-python preprocessing.py
+source /beegfs/u/bbd1146/temp_install/bin/activate
+python ae_quhmain.py

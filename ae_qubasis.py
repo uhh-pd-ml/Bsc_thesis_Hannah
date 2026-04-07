@@ -1,9 +1,12 @@
 import numpy as np
+import random
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+import os
 from os import makedirs
 from os.path import join
 from sklearn.base import BaseEstimator
@@ -12,57 +15,41 @@ from tqdm import tqdm
 
 from pquant.core.torch.layers import PQDense
 from pquant import get_model_losses, get_layer_keep_ratio
+from pquant import get_ebops
+from pquant import train_model, apply_final_compression
+
+import hls4ml
+from hls4ml.utils import config_from_pytorch_model
+from hls4ml.converters import convert_from_pytorch_model
 
 
 class QuantizedAutoencoderModel(nn.Module):
-    def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1,4,11)):
-        super().__init__()
-
-        self.pq_layers = nn.ModuleList()
-        current_inputs = n_inputs
-        for i, nodes in enumerate(layers):
-
-            # Don't add activation function for last layer
-            is_last = (i == len(layers) - 1)
+    def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1, 4, 11)):
+            super().__init__()
+            self.pq_layers = nn.ModuleList()
             
-            self.pq_layers.append(
-                PQDense(config, current_inputs, nodes,
-                        in_quant_bits=in_out_bits if i == 0 else None,
+            current_inputs = n_inputs
+            for i, nodes in enumerate(layers):
+                is_first = (i == 0)
+                is_last = (i == len(layers) - 1)
+                
+                self.pq_layers.append(
+                    PQDense(
+                        config, current_inputs, nodes,
+                        in_quant_bits=in_out_bits if is_first else None,
                         out_quant_bits=in_out_bits if is_last else None,
                         quantize_output=is_last,
-                        enable_pruning=True)
-            )
-            current_inputs = nodes
+                        enable_pruning=True
+                    )
+                )
+                current_inputs = nodes
 
     def forward(self, x):
         for i, layer in enumerate(self.pq_layers):
             x = layer(x)
-            # No ReLU in last layer 
             if i < len(self.pq_layers) - 1:
                 x = F.relu(x)
         return x
-
-
-class AutoencoderModel(nn.Module):
-    """A PyTorch module implementing a simple feed-forward neural network.
-    """
-
-    def __init__(self, layers=[32, 16, 4, 16, 32], n_inputs=10):
-        super().__init__()
-
-        self.layers = []
-        for i, nodes in enumerate(layers):
-            self.layers.append(nn.Linear(n_inputs, nodes))
-
-            # Don't add activation function for last layer
-            if (i < (len(layers) - 1)):
-                self.layers.append(nn.ReLU())
-            n_inputs = nodes
-
-        self.model_stack = nn.Sequential(*self.layers)
-
-    def forward(self, X):
-        return self.model_stack(X)
 
 
 class Autoencoder(BaseEstimator):
@@ -123,36 +110,13 @@ class Autoencoder(BaseEstimator):
         self.config = config
         self.save_path = save_path
         if save_path is not None:
-            self.clsf_model_path = join(save_path, "AE_models/")
+            self.clsf_model_path = join(save_path, "/beegfs/u/bbd1146/ae_data_output/AE_models/")
         else:
             self.clsf_model_path = None
 
         self.layers = layers
         self.n_inputs = n_inputs
         self.lr = lr
-
-        self.model = QuantizedAutoencoderModel(config, layers=layers, n_inputs=n_inputs)
-
-        #self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
-        parameters = list(self.model.named_parameters())
-        threshold_params = [v for n, v in parameters if "threshold" in n and v.requires_grad]
-        rest_params = [v for n, v in parameters if "threshold" not in n and v.requires_grad]
-        self.optimizer = optim.Adam([
-            {
-                "params": threshold_params,
-                "weight_decay": 0,    # Absolut kein Weight Decay für Schwellenwerte!
-            },
-            {
-                "params": rest_params, 
-                "weight_decay": 1e-4  # Normales Weight Decay für Gewichte (optional)
-            }
-        ], lr=self.lr)
-
-
-        self.loss = F.mse_loss
-        self.no_gpu = no_gpu
-        self.device = torch.device("cuda:0" if torch.cuda.is_available()
-                                   and not no_gpu else "cpu")
         self.early_stopping = early_stopping
         self.patience = patience
         self.val_split = val_split
@@ -160,20 +124,39 @@ class Autoencoder(BaseEstimator):
         self.epochs = epochs
         self.verbose = verbose
 
-        self.history_keep_ratio = []
-        self.history_val_loss = []
-        self.history_ebops = []
-        self.history_val_accuracy = []
+        self.device = torch.device("cuda" if torch.cuda.is_available() and not no_gpu else "cpu")
+
+        self.model = QuantizedAutoencoderModel(config, layers=layers, n_inputs=n_inputs)
+
+        
+        params = list(self.model.named_parameters())
+        self.optimizer = optim.Adam([
+            {"params": [v for n, v in params if "threshold" in n and v.requires_grad], "weight_decay": 0},
+            {"params": [v for n, v in params if "threshold" not in n and v.requires_grad], "weight_decay": 1e-4}
+        ], lr=self.lr)
+
+
+        self.loss = F.mse_loss
+        self.no_gpu = no_gpu
+        
+        self.history = {"train_loss": [],"keep_ratio": [], "val_loss": [], "val_accuracies": [],"ebops": []}
 
         self.model.to(self.device)
         self.model(torch.randn(1, n_inputs).to(self.device))
         # defaulting to eval mode, switching to train mode in fit()
         self.model.eval()
-        
         self.load = load
 
         if load:
             self.load_best_model()
+
+    def set_seed(seed=42):
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     def predict_proba(self, X, m=None):
         """Runs input data through the model and computes reconstruction
@@ -313,88 +296,69 @@ class Autoencoder(BaseEstimator):
 
         # build data loader out of numpy arrays
 
-        X_train_torch = torch.from_numpy(
-            X_train).type(torch.FloatTensor).to(self.device)
+        X_train_torch = torch.from_numpy(X_train).type(torch.FloatTensor).to(self.device)
         X_train_dataset = torch.utils.data.TensorDataset(X_train_torch)
-        train_loader = torch.utils.data.DataLoader(
-            X_train_dataset, batch_size=self.batch_size, shuffle=True)
+        train_loader = torch.utils.data.DataLoader(X_train_dataset, batch_size=self.batch_size, shuffle=True)
 
-        X_val_torch = torch.from_numpy(
-            X_val).type(torch.FloatTensor).to(self.device)
+        X_val_torch = torch.from_numpy(X_val).type(torch.FloatTensor).to(self.device)
         X_val_dataset = torch.utils.data.TensorDataset(X_val_torch)
-        val_loader = torch.utils.data.DataLoader(
-            X_val_dataset, batch_size=self.batch_size, shuffle=True)
+        val_loader = torch.utils.data.DataLoader(X_val_dataset, batch_size=self.batch_size, shuffle=True)
 
         
-        # --- 1. Definition der Hilfsfunktionen für PQuant ---
+        # training loop
         def pquant_train_step(model, trainloader, device, loss_function, optimizer, epoch, **kwargs):
             model.train()
             total_loss = 0
-            for i, batch in enumerate(trainloader):
-                batch_inputs = batch[0].to(device)
+            for data in trainloader:
+                inputs = data[0].to(device)
                 optimizer.zero_grad()
-                batch_outputs = model(batch_inputs)
+                outputs = model(inputs)
                 
                 # Loss
-                recon_loss = loss_function(batch_outputs, batch_inputs)
+                recon_loss = loss_function(outputs, inputs)
                 pquant_loss = get_model_losses(model, torch.tensor(0.).to(device))
                 
                 loss = recon_loss + pquant_loss
                 loss.backward()
                 optimizer.step()
                 total_loss += loss.item()
-            return total_loss / len(trainloader)
 
+            avg_loss = total_loss / len(trainloader)
+            self.history["train_loss"].append(avg_loss) 
+            return avg_loss
+
+        #validation loop
+        
         def pquant_val_step(model, testloader, device, loss_function, epoch, **kwargs):
             model.eval()
             val_loss = 0
+            val_acc = 0
             with torch.no_grad():
-                for i, batch in enumerate(testloader):
-                    batch_inputs = batch[0].to(device)
-                    outputs = model(batch_inputs)
-                    val_loss += loss_function(outputs, batch_inputs).item()
+                for data in testloader:
+                    inputs = data[0].to(device)
+                    outputs = model(inputs)
+                    val_loss += loss_function(outputs, inputs).item()
+                    acc = torch.mean((torch.argmax(outputs, dim=1) == torch.argmax(inputs, dim=1)).float()).cpu().numpy()
+                    val_acc += acc.item()
             
-            # Hier tracken wir die Sparsity (wie viel vom Modell noch "da" ist)
-            ratio = get_layer_keep_ratio(model).item()
-            self.history_keep_ratio.append(ratio)
-            if self.verbose:
-                print(f" [Epoch {epoch}] Val Loss: {val_loss/len(testloader):.6f} | Weights remaining: {ratio:.2%}")
-            return val_loss / len(testloader)
-        
-        def pquant_val_step(model, testloader, device, loss_function, epoch, **kwargs):
-            model.eval()
-            val_loss_sum = 0
-            from pquant import get_ebops # Tutorial-Metrik für Hardware-Effizienz
+            avg_loss = val_loss / len(testloader)
+            keep_ratio = get_layer_keep_ratio(model).item()
             
-            with torch.no_grad():
-                for i, batch in enumerate(testloader):
-                    batch_inputs = batch[0].to(device)
-                    outputs = model(batch_inputs)
-                    loss = loss_function(outputs, batch_inputs)
-                    val_loss_sum += loss.item()
-            
-            avg_val_loss = val_loss_sum / len(testloader)
-            
-            # Statistiken sammeln (Tutorial Plot-Daten)
-            self.history_val_loss.append(avg_val_loss)
-            self.history_keep_ratio.append(get_layer_keep_ratio(model).item())
-            
-            # EBOPs (Estimated Bit Operations) - wichtig für FPGA-Metriken
-            try:
-                self.history_ebops.append(get_ebops(model).cpu().numpy())
-            except:
-                pass 
+
+
+            # History tracken
+            self.history["val_loss"].append(avg_loss)
+            self.history["keep_ratio"].append(keep_ratio)
+            self.history["ebops"].append(get_ebops(model).detach().cpu().numpy())
+            self.history["val_accuracies"].append(np.mean(val_acc))
 
             if self.verbose:
-                print(f"Epoch {epoch}: Val Loss {avg_val_loss:.6f} | Ratio {self.history_keep_ratio[-1]:.2%}")
+                print(f"Epoch {epoch}: Val Loss {avg_loss:.6f} | Ratio {self.history["keep_ratio"][-1]:.2%}")
             
-            return avg_val_loss
+            return avg_loss
         
         
-        # --- 2. Start des gesteuerten PQuant Trainings ---
-        from pquant import train_model, apply_final_compression
-        
-        print("Starting PQuant-managed training...")
+        # Starting training
         train_model(
             model=self.model,
             config=self.config,
@@ -409,8 +373,7 @@ class Autoencoder(BaseEstimator):
             gather_ebops=True
         )
 
-        # --- 3. Finalisierung: Gewichte permanent einfrieren ---
-        print("Applying final compression...")
+        # fix final weights
         apply_final_compression(self.model)
         
         self.model.eval()
@@ -419,6 +382,8 @@ class Autoencoder(BaseEstimator):
         #    self.load_best_model()
 
         return self
+
+
 
     def fit_transform(self, X, m=None, X_val=None, m_val=None):
         """Trains and then transforms the provided data to the latent space.
@@ -529,3 +494,109 @@ class Autoencoder(BaseEstimator):
 
     def _model_path(self, epoch):
         return join(self.clsf_model_path, f"CLSF_epoch_{epoch}.par")
+    
+    def plot_results (self, score_background, score_signal):
+        fig, ax = plt.subplots(3, 2, figsize=(12, 10))
+
+        # Verlauf der verbleibenden Gewichte (Sparsity)
+        ax[0, 0].plot(self.history["keep_ratio"], label="Remaining Weights %", color='blue')
+        ax[0, 0].set_title("Weight Pruning Progress")
+        ax[0, 0].legend()
+
+        # Validierungs-Loss (MSE)
+        ax[0, 1].plot(self.history["val_loss"], label="Val Loss (MSE)", color='orange')
+        ax[0, 1].set_title("Reconstruction Error")
+        ax[0, 1].legend()
+
+        # EBOPs (Hardware-Effizienz)
+        ax[1, 1].plot(self.history["ebops"], label="EBOPs", color='green')
+        ax[1, 1].set_title("Estimated Bit Operations")
+        ax[1, 1].legend()
+
+        # Histogramm der Scores
+        ax[1, 0].hist(score_background, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[1, 0].hist(score_signal, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[1, 0].set_title("Score Distribution")
+        ax[1, 0].legend()
+
+        # Validierungs-Loss (MSE)
+        ax[0, 2].plot(self.history["val_accuracies"], label="Val Accuracies", color='orange')
+        ax[0, 2].set_title("Accuracies")
+        ax[0, 2].legend()
+
+
+
+        plt.tight_layout()
+        plt.savefig('/beegfs/u/bbd1146/ae_data_output/plots.png')
+
+
+    def export_to_hls(self, X_test_bkg, X_test_sig, output_dir="hls4ml_prj", backend='vitis', target='xcvu13p-flga2577-2-e'):
+        print("Starting hls4ml conversion...")
+        
+        self.model.eval()
+        self.model.to("cpu")
+        output_dir = f"example_result_dst"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # hls4ml config
+        hls_config = config_from_pytorch_model(
+            self.model,
+            input_shape=(None, self.n_inputs), 
+            granularity='name',
+            backend=backend,
+            transpose_outputs=True
+        )
+        
+        # convert model
+        hls_model = convert_from_pytorch_model(
+            self.model,
+            io_type='io_parallel',
+            output_dir=output_dir,
+            backend=backend,
+            hls_config=hls_config,
+            part=target,
+        )
+        
+        hls_model.compile()
+        
+        # Background
+        X_bkg_c = np.ascontiguousarray(X_test_bkg).astype(np.float32)
+        p_hls_bkg = hls_model.predict(X_bkg_c)
+        score_bkg_hls = np.mean((X_bkg_c - p_hls_bkg)**2, axis=-1)
+        # Signal
+        X_sig_c = np.ascontiguousarray(X_test_sig).astype(np.float32)
+        p_hls_sig = hls_model.predict(X_sig_c)
+        score_sig_hls = np.mean((X_sig_c - p_hls_sig)**2, axis=-1)
+
+        # PyTorch Predictions
+        with torch.no_grad():
+            p_torch_bkg = self.model(torch.from_numpy(X_bkg_c)).numpy()
+            p_torch_sig = self.model(torch.from_numpy(X_sig_c)).numpy()
+            
+        score_bkg_torch = np.mean((X_bkg_c - p_torch_bkg)**2, axis=-1)
+        score_sig_torch = np.mean((X_sig_c - p_torch_sig)**2, axis=-1)
+
+        # Result
+        print(f"\nVergleich (Mean MSE):")
+        print(f"Bkg -> PyTorch: {np.mean(score_bkg_torch):.6f} | HLS: {np.mean(score_bkg_hls):.6f}")
+        print(f"Sig -> PyTorch: {np.mean(score_sig_torch):.6f} | HLS: {np.mean(score_sig_hls):.6f}")
+
+        # Plot
+        fig, ax = plt.subplots(1, 2, figsize=(12, 10))
+        # Plot für die Hardware-Ergebnisse (HLS)
+        ax[0, 0].hist(score_bkg_hls, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[0, 0].hist(score_sig_hls, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[0, 0].legend()
+        ax[0, 0].set_title("HLS Hardware Performance")
+
+        # Plot für die Software-Ergebnisse (Torch)
+        ax[0, 1].hist(score_bkg_torch, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[0, 1].hist(score_sig_torch, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[0, 1].legend()
+        ax[0, 1].set_title("PyTorch Software Performance")
+
+        plt.tight_layout()
+        plt.savefig('/beegfs/u/bbd1146/ae_data_output/convert.png')
+
+        self.model.to(self.device)
+        return score_bkg_hls, score_sig_hls, score_bkg_torch, score_sig_torch

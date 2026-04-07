@@ -38,17 +38,20 @@ Autoencoder.set_seed(42)
 
 # config erstellen
 config = dst_config()
+config.pruning_parameters.enable_pruning = False
 config.training_parameters.epochs = 50
 config.training_parameters.fine_tuning_epochs = 50
 
-config.quantization_parameters.default_data_integer_bits = 3.0
-config.quantization_parameters.default_data_fractional_bits = 7.0
-config.quantization_parameters.default_weight_integer_bits = 0.0
-config.quantization_parameters.default_weight_fractional_bits = 9.0
-config.quantization_parameters.overflow_mode_data = "SAT"
-config.quantization_parameters.overflow_mode_parameters = "SAT"
-
-config.pruning_parameters.alpha = 5e-5
+config.quantization_parameters.default_data_integer_bits = 3.
+config.quantization_parameters.default_data_fractional_bits = 3.
+config.quantization_parameters.default_weight_integer_bits = 0.
+config.quantization_parameters.default_weight_fractional_bits = 3.
+config.quantization_parameters.overflow_mode_data = "WRAP"
+config.quantization_parameters.overflow_mode_parameters = "SAT_SYM"
+# Enable HGQ
+config.quantization_parameters.use_high_granularity_quantization = True
+config.quantization_parameters.hgq_beta = 5e-6
+config.training_parameters.epochs = 200
 
 # Architektur
 my_layers=[26, 18, 12, 2, 12, 18, 26]
@@ -65,7 +68,7 @@ ae_model = Autoencoder(
     early_stopping=True,
     patience=5,
     verbose=True,
-    save_path="ae_data" 
+    save_path="/beegfs/u/bbd1146/ae_data_output" 
 )
 
 # Training
@@ -93,8 +96,8 @@ X_s_sr_scaled = scaler.transform(X_s_sr_raw)
 score_background = ae_model.predict_proba(X_b_sr_scaled)
 score_signal = ae_model.predict_proba(X_s_sr_scaled)
 
-np.save('ae_data/scores_bg.npy', score_background)
-np.save('ae_data/scores_sig.npy', score_signal)
+np.save('/beegfs/u/bbd1146/ae_data_output/scores_bg.npy', score_background)
+np.save('/beegfs/u/bbd1146/ae_data_output/scores_sig.npy', score_signal)
 
 
 print(f"\n--- Ergebnisse ---")
@@ -104,3 +107,4 @@ print(f"MSE Background: {np.mean(score_background):.6f}")
 print(f"MSE Signal:     {np.mean(score_signal):.6f}")
 
 ae_model.plot_results(score_background, score_signal)
+s_bkg_hls, s_sig_hls, s_bkg_torch, s_sig_torch = ae_model.export_to_hls(X_b_sr_scaled, X_s_sr_scaled, output_dir="/beegfs/u/bbd1146/ae_results_job1/hls_project")
