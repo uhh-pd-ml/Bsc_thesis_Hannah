@@ -11,11 +11,16 @@ import numpy as np
 from ae_qubasis import Autoencoder
 from pquant import dst_config
 
-###### Preworking #######
-# Name data
+##### inputs ######
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-run_path = os.path.join("/beegfs/u/bbd1146/ae_data_output", f"run_{timestamp}")
+RUN_PATH = os.path.join("/beegfs/u/bbd1146/ae_data_output", f"run_{timestamp}")
 
+N_INPUTS = 10
+#LAYERS = [26, 18, 12, 2, 12, 18, 26]
+LAYERS = [10, 8, 4, 2, 4, 8, 10]
+
+
+###### Preworking #######
 # Load data
 with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_br.h5', 'r') as f:
     kinematics = f['jet_kinematics'][:]
@@ -26,8 +31,8 @@ def process_features(kinematics, jettiness, indices):
     X = np.concatenate([kinematics, jettiness], axis=1)[:, indices]
     return X
 
-#useful_indices = [0,1,2,3,5,6,9,11,18,22]
-useful_indices = list(range(26))
+useful_indices = [0,1,2,3,5,6,9,11,18,22]
+#useful_indices = list(range(26))
 X_train_raw = process_features(kinematics, jettiness, useful_indices)
 
 # Skale data
@@ -52,26 +57,21 @@ config.quantization_parameters.overflow_mode_data = "SAT"
 config.quantization_parameters.overflow_mode_parameters = "SAT_SYM"
 # Enable HGQ
 config.quantization_parameters.use_high_granularity_quantization = True
-config.quantization_parameters.hgq_beta = 1e-6
+config.quantization_parameters.hgq_beta = 1e-7
 # For DST
 #config.pruning_parameters.alpha = 5e-5
 
-# layers
-my_layers=[26, 18, 12, 2, 12, 18, 26]
-#my_layers=[10, 8, 4, 2, 4, 8, 10]
-
-
 ae_model = Autoencoder(
     config=config,
-    n_inputs=26,
-    layers=my_layers,
+    n_inputs=N_INPUTS,
+    layers=LAYERS,
     lr=0.001,
     batch_size=256,
     epochs=config.training_parameters.epochs,
     early_stopping=True,
     patience=5,
     verbose=True,
-    save_path=run_path 
+    save_path=RUN_PATH
 )
 
 ###### Training ######
@@ -99,8 +99,8 @@ X_s_sr_scaled = scaler.transform(X_s_sr_raw)
 score_background = ae_model.predict_proba(X_b_sr_scaled)
 score_signal = ae_model.predict_proba(X_s_sr_scaled)
 
-np.save(os.path.join(run_path, 'scores_bg.npy'), score_background)
-np.save(os.path.join(run_path, 'scores_sig.npy'), score_signal)
+np.save(os.path.join(RUN_PATH, 'scores_bg.npy'), score_background)
+np.save(os.path.join(RUN_PATH, 'scores_sig.npy'), score_signal)
 
 
 print(f"\n--- Results ---")
@@ -112,4 +112,15 @@ print(f"MSE Signal:     {np.mean(score_signal):.6f}")
 
 ###### Analysing ######
 ae_model.plot_results(score_background, score_signal)
+
+s_bg = np.load(f'{RUN_PATH}/scores_bg.npy')
+s_sig = np.load(f'{RUN_PATH}/scores_sig.npy')
+
+ae_model.plot_loss_histogram(s_bg, s_sig)
+ae_model.plot_roc_curve(s_bg, s_sig)
+ae_model.plot_learning_curve(f"{RUN_PATH}/CLSF_train_losses.npy", f"{RUN_PATH}/CLSF_val_losses.npy")
+
+
+
+##### to hls ######
 s_bkg_hls, s_sig_hls, s_bkg_torch, s_sig_torch = ae_model.export_to_hls(X_b_sr_scaled, X_s_sr_scaled)

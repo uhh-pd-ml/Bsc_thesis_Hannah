@@ -2,7 +2,6 @@ import os
 import h5py
 import numpy as np
 import torch
-import pandas as pd
 import matplotlib.pyplot as plt
 import shap
 from sklearn.metrics import roc_curve, auc

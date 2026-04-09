@@ -2,7 +2,7 @@
 #SBATCH --job-name=hummel_run
 #SBATCH --output=/beegfs/u/bbd1146/hummel_output%J.log
 #SBATCH --error=/beegfs/u/bbd1146/hummel_error%J.log
-#SBATCH --time=8:00:00
+#SBATCH --time=6:00:00
 #SBATCH --partition=std
 #SBATCH --cpus-per-task=16
 #SBATCH --mail-type=all

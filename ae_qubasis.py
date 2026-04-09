@@ -22,6 +22,9 @@ import hls4ml
 from hls4ml.utils import config_from_pytorch_model
 from hls4ml.converters import convert_from_pytorch_model
 
+from sklearn.metrics import roc_curve, auc
+from sklearn.preprocessing import StandardScaler
+
 
 class QuantizedAutoencoderModel(nn.Module):
     def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1, 4, 11)):
@@ -181,7 +184,7 @@ class Autoencoder(BaseEstimator):
                 "Conditional data not implemented for Autoencoder")
 
         reco = self.transform(X, m=m)
-        reco_error = np.sum((X - reco)**2, axis=-1)
+        reco_error = np.mean((X - reco)**2, axis=-1)
 
         return reco_error
 
@@ -491,8 +494,14 @@ class Autoencoder(BaseEstimator):
         self._load_model(self._model_path(epoch))
 
     def _load_model(self, model_path):
-        self.model.load_state_dict(torch.load(model_path,
-                                              map_location=self.device))
+        #self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        #self.model.load_state_dict(torch.load(model_path, map_location=self.device), strict=False)
+
+        state_dict = torch.load(model_path, map_location=self.device)
+        keys_to_delete = [k for k in state_dict.keys() if '.i' in k or '.f' in k or '.b' in k]
+        for k in keys_to_delete:
+            del state_dict[k] 
+        self.model.load_state_dict(state_dict, strict=False)
 
     def _save_model(self, model_path):
         torch.save(self.model.state_dict(), model_path)
@@ -534,6 +543,64 @@ class Autoencoder(BaseEstimator):
 
         plt.tight_layout()
         plt.savefig(join(self.save_path, 'plots.png'))
+
+
+
+
+    def plot_loss_histogram(self, score_bg, score_sig):
+        """Erstellt ein Histogramm der Rekonstruktionsverluste."""
+        plt.figure(figsize=(9, 6))
+        limit = np.percentile(score_sig, 98)
+        
+        plt.hist(score_bg, bins=100, density=True, alpha=0.5, label='Background (QCD)', color='royalblue', range=(0, limit))
+        plt.hist(score_sig, bins=100, density=True, alpha=0.6, label='Signal (BSM)', color='crimson', range=(0, limit))
+
+        plt.xlabel('Autoencoder Reconstruction Loss (MSE)', fontsize=12)
+        plt.ylabel('Probability Density', fontsize=12)
+        plt.legend(frameon=True)
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(join(self.save_path, 'loss_histogram.png'), dpi=300)
+        plt.close()
+
+    def plot_roc_curve(self, score_bg, score_sig):
+        """Erstellt die ROC-Kurve und berechnet AUC."""
+        y_true = np.concatenate([np.zeros(len(score_bg)), np.ones(len(score_sig))])
+        y_scores = np.concatenate([score_bg, score_sig])
+        fpr, tpr, _ = roc_curve(y_true, y_scores)
+        roc_auc = auc(fpr, tpr)
+
+        plt.figure(figsize=(7, 7))
+        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'AE Model (AUC = {roc_auc:.3f})')
+        plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--', label='Random Classifier')
+
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate (FPR)', fontsize=12)
+        plt.ylabel('True Positive Rate (TPR)', fontsize=12)
+        plt.title('Anomaly Detection Performance', fontsize=14)
+        plt.legend(loc="lower right")
+        plt.grid(alpha=0.3)
+        plt.savefig(join(self.save_path, 'ROC_Kurve.png'), dpi=300)
+        plt.close()
+
+    def plot_learning_curve(self, train_loss_path, val_loss_path):
+        """Plottet die Trainings- und Validierungsverluste."""
+        train_losses = np.load(train_loss_path)
+        val_losses = np.load(val_loss_path)
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(train_losses, label='Training', color='#1f77b4', lw=2)
+        plt.plot(val_losses, label='Validation', color='#ff7f0e', lw=2)
+
+        #plt.yscale('log')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss (MSE)')
+        plt.title('Autoencoder Training Progress')
+        plt.legend()
+        plt.grid(True, which="both", alpha=0.3)
+        plt.savefig(join(self.save_path, 'learning_curve.png'), bbox_inches='tight')
+        plt.close()
 
 
     def export_to_hls(self, X_test_bkg, X_test_sig, output_dir="hls4ml_prj", backend='vitis', target='xcvu13p-flga2577-2-e'):
@@ -602,7 +669,9 @@ class Autoencoder(BaseEstimator):
         ax[1].set_title("PyTorch Software Performance")
 
         plt.tight_layout()
-        plt.savefig(join(self.save_path, 'plots.png'))
+        plt.savefig(join(self.save_path, 'hls_comparison.png'))
 
         self.model.to(self.device)
         return score_bkg_hls, score_sig_hls, score_bkg_torch, score_sig_torch
+
+
