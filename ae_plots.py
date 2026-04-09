@@ -10,8 +10,8 @@ from sklearn.preprocessing import StandardScaler
 from ae_basis import Autoencoder
 
 # --- KONFIGURATION & PFADE ---
-BASE_PATH = "ae_data"
-MODEL_PATH = "ae_data/AE_models/CLSF_epoch_35.par"
+BASE_PATH = "/beegfs/u/bbd1146/ae_data_output"
+MODEL_PATH = "/beegfs/u/bbd1146/ae_data_output/AE_models/CLSF_epoch_35.par"
 DATA_BG = "/beegfs/u/bbd1146/daten_26F/events_b_br.h5"
 DATA_SIG = "/beegfs/u/bbd1146/daten_26F/events_s_sr.h5"
 

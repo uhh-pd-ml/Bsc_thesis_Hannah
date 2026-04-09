@@ -1,8 +1,8 @@
 import os
-# Do this before importing Keras to use Torch PQLayers
-os.environ["KERAS_BACKEND"] = "torch"
+os.environ["KERAS_BACKEND"] = "torch" # Do this before importing Keras to use Torch PQLayers
 
 import torch
+from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_curve, auc
 import matplotlib.pyplot as plt
@@ -11,49 +11,52 @@ import numpy as np
 from ae_qubasis import Autoencoder
 from pquant import dst_config
 
-def process_features(kinematics, jettiness, indices):
-    X = np.concatenate([kinematics, jettiness], axis=1)[:, indices]
-    
-    #dphi = np.abs(kinematics[:, 4] - kinematics[:, 8])
-    #dphi[dphi > np.pi] = 2 * np.pi - dphi[dphi > np.pi]
-    #return np.concatenate([X, dphi.reshape(-1, 1)], axis=1)
-    return X
+###### Preworking #######
+# Name data
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+run_path = os.path.join("/beegfs/u/bbd1146/ae_data_output", f"run_{timestamp}")
 
-# Daten aus den H5-Files laden
+# Load data
 with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_br.h5', 'r') as f:
     kinematics = f['jet_kinematics'][:]
     jettiness = f['jettiness'][:]
-    
-# Jettiness und kinematics kombinieren
+
+# Combine data
+def process_features(kinematics, jettiness, indices):
+    X = np.concatenate([kinematics, jettiness], axis=1)[:, indices]
+    return X
+
 #useful_indices = [0,1,2,3,5,6,9,11,18,22]
 useful_indices = list(range(26))
 X_train_raw = process_features(kinematics, jettiness, useful_indices)
 
-# Skalieren
+# Skale data
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train_raw)
 
-# seed setzen
+# set seed
 Autoencoder.set_seed(42)
 
-# config erstellen
+
+###### config #######
 config = dst_config()
 config.pruning_parameters.enable_pruning = False
 config.training_parameters.epochs = 50
 config.training_parameters.fine_tuning_epochs = 50
 
 config.quantization_parameters.default_data_integer_bits = 3.
-config.quantization_parameters.default_data_fractional_bits = 3.
-config.quantization_parameters.default_weight_integer_bits = 0.
-config.quantization_parameters.default_weight_fractional_bits = 3.
-config.quantization_parameters.overflow_mode_data = "WRAP"
+config.quantization_parameters.default_data_fractional_bits = 5.
+config.quantization_parameters.default_weight_integer_bits = 1.
+config.quantization_parameters.default_weight_fractional_bits = 6.
+config.quantization_parameters.overflow_mode_data = "SAT"
 config.quantization_parameters.overflow_mode_parameters = "SAT_SYM"
 # Enable HGQ
 config.quantization_parameters.use_high_granularity_quantization = True
-config.quantization_parameters.hgq_beta = 5e-6
-config.training_parameters.epochs = 200
+config.quantization_parameters.hgq_beta = 1e-6
+# For DST
+#config.pruning_parameters.alpha = 5e-5
 
-# Architektur
+# layers
 my_layers=[26, 18, 12, 2, 12, 18, 26]
 #my_layers=[10, 8, 4, 2, 4, 8, 10]
 
@@ -64,22 +67,22 @@ ae_model = Autoencoder(
     layers=my_layers,
     lr=0.001,
     batch_size=256,
-    epochs=50,
+    epochs=config.training_parameters.epochs,
     early_stopping=True,
     patience=5,
     verbose=True,
-    save_path="/beegfs/u/bbd1146/ae_data_output" 
+    save_path=run_path 
 )
 
-# Training
+###### Training ######
 ae_model.fit(X_train)
 
-# Lade Test-Daten (b_sr und s_sr)
+###### Testing #######
+# load test data (b_sr and s_sr)
 # Background in Signal Region
 with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_sr.h5', 'r') as f:
     kin_b_sr = f['jet_kinematics'][:]
     jet_b_sr = f['jettiness'][:]
-
 # Signal in Signal Region
 with h5py.File('/beegfs/u/bbd1146/daten_26F/events_s_sr.h5', 'r') as f:
     kin_s_sr = f['jet_kinematics'][:]
@@ -92,19 +95,21 @@ X_s_sr_raw = process_features(kin_s_sr, jet_s_sr, useful_indices)
 X_b_sr_scaled = scaler.transform(X_b_sr_raw)
 X_s_sr_scaled = scaler.transform(X_s_sr_raw)
 
-# Berechne den Rekonstruktionsfehler (MSE)
+# Calculate and save Reconstruction loss (MSE)
 score_background = ae_model.predict_proba(X_b_sr_scaled)
 score_signal = ae_model.predict_proba(X_s_sr_scaled)
 
-np.save('/beegfs/u/bbd1146/ae_data_output/scores_bg.npy', score_background)
-np.save('/beegfs/u/bbd1146/ae_data_output/scores_sig.npy', score_signal)
+np.save(os.path.join(run_path, 'scores_bg.npy'), score_background)
+np.save(os.path.join(run_path, 'scores_sig.npy'), score_signal)
 
 
-print(f"\n--- Ergebnisse ---")
+print(f"\n--- Results ---")
 print(f"Number of Background Events (SR): {len(X_b_sr_scaled)}")
 print(f"Number of Signal Events (SR):     {len(X_s_sr_scaled)}")
 print(f"MSE Background: {np.mean(score_background):.6f}")
 print(f"MSE Signal:     {np.mean(score_signal):.6f}")
 
+
+###### Analysing ######
 ae_model.plot_results(score_background, score_signal)
-s_bkg_hls, s_sig_hls, s_bkg_torch, s_sig_torch = ae_model.export_to_hls(X_b_sr_scaled, X_s_sr_scaled, output_dir="/beegfs/u/bbd1146/ae_results_job1/hls_project")
+s_bkg_hls, s_sig_hls, s_bkg_torch, s_sig_torch = ae_model.export_to_hls(X_b_sr_scaled, X_s_sr_scaled)

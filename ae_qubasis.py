@@ -110,7 +110,7 @@ class Autoencoder(BaseEstimator):
         self.config = config
         self.save_path = save_path
         if save_path is not None:
-            self.clsf_model_path = join(save_path, "/beegfs/u/bbd1146/ae_data_output/AE_models/")
+            self.clsf_model_path = join(save_path, "AE_models")
         else:
             self.clsf_model_path = None
 
@@ -324,23 +324,23 @@ class Autoencoder(BaseEstimator):
                 total_loss += loss.item()
 
             avg_loss = total_loss / len(trainloader)
-            self.history["train_loss"].append(avg_loss) 
+            self.history["train_loss"].append(avg_loss)
+
+            if self.save_path is not None:
+                np.save(self._train_loss_path(), np.array(self.history["train_loss"]))
+
             return avg_loss
 
         #validation loop
-        
         def pquant_val_step(model, testloader, device, loss_function, epoch, **kwargs):
             model.eval()
             val_loss = 0
-            val_acc = 0
             with torch.no_grad():
                 for data in testloader:
                     inputs = data[0].to(device)
                     outputs = model(inputs)
                     val_loss += loss_function(outputs, inputs).item()
-                    acc = torch.mean((torch.argmax(outputs, dim=1) == torch.argmax(inputs, dim=1)).float()).cpu().numpy()
-                    val_acc += acc.item()
-            
+                    
             avg_loss = val_loss / len(testloader)
             keep_ratio = get_layer_keep_ratio(model).item()
             
@@ -349,11 +349,22 @@ class Autoencoder(BaseEstimator):
             # History tracken
             self.history["val_loss"].append(avg_loss)
             self.history["keep_ratio"].append(keep_ratio)
-            self.history["ebops"].append(get_ebops(model).detach().cpu().numpy())
-            self.history["val_accuracies"].append(np.mean(val_acc))
+            #self.history["ebops"].append(get_ebops(model).detach().cpu().numpy())
+
+            calc_heavy_metrics = (epoch % 10 == 0)
+            if calc_heavy_metrics or epoch == self.epochs:
+                current_ebops = get_ebops(model).item()
+                self.history["ebops"].append(current_ebops)
+            else:
+                last_ebops = self.history["ebops"][-1] if self.history["ebops"] else 0
+                self.history["ebops"].append(last_ebops)
+
+            if self.save_path is not None:
+                np.save(self._val_loss_path(), np.array(self.history["val_loss"]))
+                self._save_model(self._model_path(epoch))
 
             if self.verbose:
-                print(f"Epoch {epoch}: Val Loss {avg_loss:.6f} | Ratio {self.history["keep_ratio"][-1]:.2%}")
+                print(f"Epoch {epoch}: Val Loss {avg_loss:.6f} | Ratio {self.history['keep_ratio'][-1]:.2%}")
             
             return avg_loss
         
@@ -373,13 +384,13 @@ class Autoencoder(BaseEstimator):
             gather_ebops=True
         )
 
-        # fix final weights
+        # fixing final weights
         apply_final_compression(self.model)
         
         self.model.eval()
-        #if self.save_path is not None:
-        #    print("Loading best model state...")
-        #    self.load_best_model()
+        if self.save_path is not None:
+            print("Loading best model state...")
+            self.load_best_model()
 
         return self
 
@@ -496,7 +507,7 @@ class Autoencoder(BaseEstimator):
         return join(self.clsf_model_path, f"CLSF_epoch_{epoch}.par")
     
     def plot_results (self, score_background, score_signal):
-        fig, ax = plt.subplots(3, 2, figsize=(12, 10))
+        fig, ax = plt.subplots(2, 2, figsize=(14, 10))
 
         # Verlauf der verbleibenden Gewichte (Sparsity)
         ax[0, 0].plot(self.history["keep_ratio"], label="Remaining Weights %", color='blue')
@@ -519,15 +530,10 @@ class Autoencoder(BaseEstimator):
         ax[1, 0].set_title("Score Distribution")
         ax[1, 0].legend()
 
-        # Validierungs-Loss (MSE)
-        ax[0, 2].plot(self.history["val_accuracies"], label="Val Accuracies", color='orange')
-        ax[0, 2].set_title("Accuracies")
-        ax[0, 2].legend()
-
 
 
         plt.tight_layout()
-        plt.savefig('/beegfs/u/bbd1146/ae_data_output/plots.png')
+        plt.savefig(join(self.save_path, 'plots.png'))
 
 
     def export_to_hls(self, X_test_bkg, X_test_sig, output_dir="hls4ml_prj", backend='vitis', target='xcvu13p-flga2577-2-e'):
@@ -535,7 +541,7 @@ class Autoencoder(BaseEstimator):
         
         self.model.eval()
         self.model.to("cpu")
-        output_dir = f"example_result_dst"
+        output_dir = join(self.save_path, "hls_project")
         os.makedirs(output_dir, exist_ok=True)
         
         # hls4ml config
@@ -584,19 +590,19 @@ class Autoencoder(BaseEstimator):
         # Plot
         fig, ax = plt.subplots(1, 2, figsize=(12, 10))
         # Plot für die Hardware-Ergebnisse (HLS)
-        ax[0, 0].hist(score_bkg_hls, bins=50, alpha=0.5, label='Bkg', density=True)
-        ax[0, 0].hist(score_sig_hls, bins=50, alpha=0.5, label='Sig', density=True)
-        ax[0, 0].legend()
-        ax[0, 0].set_title("HLS Hardware Performance")
+        ax[0].hist(score_bkg_hls, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[0].hist(score_sig_hls, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[0].legend()
+        ax[0].set_title("HLS Hardware Performance")
 
         # Plot für die Software-Ergebnisse (Torch)
-        ax[0, 1].hist(score_bkg_torch, bins=50, alpha=0.5, label='Bkg', density=True)
-        ax[0, 1].hist(score_sig_torch, bins=50, alpha=0.5, label='Sig', density=True)
-        ax[0, 1].legend()
-        ax[0, 1].set_title("PyTorch Software Performance")
+        ax[1].hist(score_bkg_torch, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[1].hist(score_sig_torch, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[1].legend()
+        ax[1].set_title("PyTorch Software Performance")
 
         plt.tight_layout()
-        plt.savefig('/beegfs/u/bbd1146/ae_data_output/convert.png')
+        plt.savefig(join(self.save_path, 'plots.png'))
 
         self.model.to(self.device)
         return score_bkg_hls, score_sig_hls, score_bkg_torch, score_sig_torch
