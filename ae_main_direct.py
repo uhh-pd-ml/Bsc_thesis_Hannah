@@ -9,22 +9,18 @@ from ae_basis import Autoencoder
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 RUN_PATH = os.path.join("/beegfs/u/bbd1146/ae_data_output", f"run_{timestamp}")
 
-N_INPUTS = 26
-LAYERS = [26, 18, 12, 2, 12, 18, 26]
+N_INPUTS = 60
+LAYERS = [60, 40, 20, 2, 20, 40, 60]
 #LAYERS = [10, 8, 4, 2, 4, 8, 10]
-
-# Feature Selection
-#useful_indices = [0,1,2,3,5,6,9,11,18,22]
-useful_indices = list(range(26))
 
 
 ###### Data Preparation #######
 # Load background (b_br) training data
 with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_br.h5', 'r') as f:
-    kinematics = f['jet_kinematics'][:]
-    jettiness = f['jettiness'][:]
+    j1_train = f['jet1_PFCands'][:, :30] 
+    j2_train = f['jet2_PFCands'][:, :30]
 
-X_train_raw = np.concatenate([kinematics, jettiness], axis=1)[:, useful_indices]
+X_train_raw = np.concatenate([j1_train, j2_train], axis=1)
 
 # Standardization
 scaler = StandardScaler()
@@ -54,18 +50,15 @@ ae_model.fit(X_train)
 
 ###### Testing #######
 # Load Signal Region (SR) data for both Background (Normal) and Signal (Anomaly)
-# Background in Signal Region
 with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_sr.h5', 'r') as f:
-    kin_b_sr = f['jet_kinematics'][:]
-    jet_b_sr = f['jettiness'][:]
-# Signal in Signal Region
-with h5py.File('/beegfs/u/bbd1146/daten_26F/events_s_sr.h5', 'r') as f:
-    kin_s_sr = f['jet_kinematics'][:]
-    jet_s_sr = f['jettiness'][:]
+    j1_b_sr = f['jet1_PFCands'][:, :30]
+    j2_b_sr = f['jet2_PFCands'][:, :30]
+X_b_sr_raw = np.concatenate([j1_b_sr, j2_b_sr], axis=1)
 
-# Apply the same scaling transformation used for training
-X_b_sr_raw = np.concatenate([kin_b_sr, jet_b_sr], axis=1)[:, useful_indices]
-X_s_sr_raw = np.concatenate([kin_s_sr, jet_s_sr], axis=1)[:, useful_indices]
+with h5py.File('/beegfs/u/bbd1146/daten_26F/events_s_sr.h5', 'r') as f:
+    j1_s_sr = f['jet1_PFCands'][:, :30]
+    j2_s_sr = f['jet2_PFCands'][:, :30]
+X_s_sr_raw = np.concatenate([j1_s_sr, j2_s_sr], axis=1)
 
 X_b_sr_scaled = scaler.transform(X_b_sr_raw)
 X_s_sr_scaled = scaler.transform(X_s_sr_raw)

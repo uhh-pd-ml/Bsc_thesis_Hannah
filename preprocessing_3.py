@@ -30,6 +30,11 @@ events_combined = fnew
 events_np = np.asarray(events_combined)
 n_pf = fnew.shape[0]  
 
+all_particles = events_np[:, :2100].reshape(-1, 700, 3)
+idx = np.argsort(all_particles[:, :, 0], axis=1)[:, ::-1]
+all_particles_sorted = np.take_along_axis(all_particles, idx[:, :, np.newaxis], axis=1)
+events_top20 = all_particles_sorted[:, :20, :]
+
 # Initialize arrays to store Particle Flow (PF) candidates for the leading two jets
 # Storing 300 values (100 particles * 3 features: pt, eta, phi)
 j1pf = np.zeros((n_pf, 300), np.float16)
@@ -47,20 +52,17 @@ jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 1.0)
 # [4 global N-subjettiness, 4 sub-jettiness for jet 1, 4 sub-jettiness for jet 2]
 jettiness_features = np.zeros((n_pf, 12), np.float32)
 
-events_np = np.asarray(events_combined)
-
 
 # --- Event Processing Loop ---
 for i in range(len(events_np)):
     if i % 1000 == 0:
         print(f'> computed {i} events')
 
-    # Each event has up to 700 particles with (pt, eta, phi)
-    event = events_np[i, :700*3].reshape(700, 3)
-    mask  = event[:, 0] > 0
-    pts   = event[mask, 0]
-    etas  = event[mask, 1]
-    phis  = event[mask, 2]
+    sorted_event = events_top20[i]
+
+    pts   = sorted_event[:20, 0]
+    etas  = sorted_event[:20, 1]
+    phis  = sorted_event[:20, 2]
 
     # Create a 4-vector array for clustering
     array = ak.Array(

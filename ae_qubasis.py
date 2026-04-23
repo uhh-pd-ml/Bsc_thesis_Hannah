@@ -334,7 +334,7 @@ class Autoencoder(BaseEstimator):
 
             return avg_loss
 
-        #validation loop
+        # validation loop
         def pquant_val_step(model, testloader, device, loss_function, epoch, **kwargs):
             model.eval()
             val_loss = 0
@@ -603,7 +603,7 @@ class Autoencoder(BaseEstimator):
         plt.close()
 
 
-    def export_to_hls(self, X_test_bkg, X_test_sig, output_dir="hls4ml_prj", backend='vitis', target='xcvu13p-flga2577-2-e'):
+    def export_to_hls(self, X_test_bkg, X_test_sig, output_dir="hls4ml_prj", backend='vitis', target='xcvc1902-vsvd1760-2mp-e-s'):
         print("Starting hls4ml conversion...")
         
         self.model.eval()
@@ -631,7 +631,7 @@ class Autoencoder(BaseEstimator):
         )
         
         hls_model.compile()
-        
+
         # Background
         X_bkg_c = np.ascontiguousarray(X_test_bkg).astype(np.float32)
         p_hls_bkg = hls_model.predict(X_bkg_c)

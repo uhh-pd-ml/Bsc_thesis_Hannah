@@ -1,4 +1,5 @@
 import numpy as np
+import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,19 +11,19 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+
 
 class AutoencoderModel(nn.Module):
-    """A PyTorch module implementing a simple feed-forward neural network.
-    """
-
+    """A PyTorch module implementing a simple feed-forward neural network."""
     def __init__(self, layers=[32, 16, 4, 16, 32], n_inputs=10):
         super().__init__()
 
         self.layers = []
         for i, nodes in enumerate(layers):
             self.layers.append(nn.Linear(n_inputs, nodes))
-
-            # Don't add activation function for last layer
+            # Apply ReLU to all but the final reconstruction layer
             if (i < (len(layers) - 1)):
                 self.layers.append(nn.ReLU())
             n_inputs = nodes
@@ -89,7 +90,7 @@ class Autoencoder(BaseEstimator):
 
         self.save_path = save_path
         if save_path is not None:
-            self.clsf_model_path = join(save_path, "AE_models/")
+            self.clsf_model_path = join(save_path, "AE_models")
         else:
             self.clsf_model_path = None
 
@@ -101,8 +102,7 @@ class Autoencoder(BaseEstimator):
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         self.loss = F.mse_loss
         self.no_gpu = no_gpu
-        self.device = torch.device("cuda:0" if torch.cuda.is_available()
-                                   and not no_gpu else "cpu")
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() and not no_gpu else "cpu")
         self.early_stopping = early_stopping
         self.patience = patience
         self.val_split = val_split
@@ -111,14 +111,21 @@ class Autoencoder(BaseEstimator):
         self.verbose = verbose
 
         self.model.to(self.device)
-
-        # defaulting to eval mode, switching to train mode in fit()
         self.model.eval()
 
         self.load = load
 
         if load:
             self.load_best_model()
+
+    def set_seed(seed=42):
+        """Sets seeds for reproducibility across numpy, random, and torch."""
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     def predict_proba(self, X, m=None):
         """Runs input data through the model and computes reconstruction
@@ -453,3 +460,58 @@ class Autoencoder(BaseEstimator):
 
     def _model_path(self, epoch):
         return join(self.clsf_model_path, f"CLSF_epoch_{epoch}.par")
+
+    def plot_loss_histogram(self, score_bg, score_sig):
+        """Erstellt ein Histogramm der Rekonstruktionsverluste."""
+        plt.figure(figsize=(9, 6))
+        limit = np.percentile(score_sig, 98)
+        
+        plt.hist(score_bg, bins=100, density=True, alpha=0.5, label='Background (QCD)', color='royalblue', range=(0, limit))
+        plt.hist(score_sig, bins=100, density=True, alpha=0.6, label='Signal (BSM)', color='crimson', range=(0, limit))
+
+        plt.xlabel('Autoencoder Reconstruction Loss (MSE)', fontsize=12)
+        plt.ylabel('Probability Density', fontsize=12)
+        plt.legend(frameon=True)
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(join(self.save_path, 'loss_histogram.png'), dpi=300)
+        plt.close()
+
+    def plot_roc_curve(self, score_bg, score_sig):
+        """Erstellt die ROC-Kurve und berechnet AUC."""
+        y_true = np.concatenate([np.zeros(len(score_bg)), np.ones(len(score_sig))])
+        y_scores = np.concatenate([score_bg, score_sig])
+        fpr, tpr, _ = roc_curve(y_true, y_scores)
+        roc_auc = auc(fpr, tpr)
+
+        plt.figure(figsize=(7, 7))
+        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'AE Model (AUC = {roc_auc:.3f})')
+        plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--', label='Random Classifier')
+
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate (FPR)', fontsize=12)
+        plt.ylabel('True Positive Rate (TPR)', fontsize=12)
+        plt.title('Anomaly Detection Performance', fontsize=14)
+        plt.legend(loc="lower right")
+        plt.grid(alpha=0.3)
+        plt.savefig(join(self.save_path, 'ROC_Kurve.png'), dpi=300)
+        plt.close()
+
+    def plot_learning_curve(self, train_loss_path, val_loss_path):
+        """Plottet die Trainings- und Validierungsverluste."""
+        train_losses = np.load(train_loss_path)
+        val_losses = np.load(val_loss_path)
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(train_losses, label='Training', color='#1f77b4', lw=2)
+        plt.plot(val_losses, label='Validation', color='#ff7f0e', lw=2)
+
+        #plt.yscale('log')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss (MSE)')
+        plt.title('Autoencoder Training Progress')
+        plt.legend()
+        plt.grid(True, which="both", alpha=0.3)
+        plt.savefig(join(self.save_path, 'learning_curve.png'), bbox_inches='tight')
+        plt.close()
