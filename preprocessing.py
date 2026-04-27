@@ -22,6 +22,10 @@ import vector
 # Define the Signal Region (SR) based on the dijet invariant mass (mjj)
 # Events outside this range are considered the Background Region (BR) and spilt into the four datasets
 signal_region = (3150, 3850)
+
+output_dir = '/beegfs/u/bbd1146/daten/'
+os.makedirs(output_dir, exist_ok=True)
+
 out_names = ['/beegfs/u/bbd1146/daten/events_b_br.h5', '/beegfs/u/bbd1146/daten/events_b_sr.h5', '/beegfs/u/bbd1146/daten/events_s_br.h5', '/beegfs/u/bbd1146/daten/events_s_sr.h5']
 
 # Load the raw event data

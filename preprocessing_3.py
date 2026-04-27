@@ -22,6 +22,10 @@ import vector
 # Define the Signal Region (SR) based on the dijet invariant mass (mjj)
 # Events outside this range are considered the Background Region (BR) and spilt into the four datasets
 signal_region = (3150, 3850)
+
+output_dir = '/beegfs/u/bbd1146/daten/'
+os.makedirs(output_dir, exist_ok=True)
+
 out_names = ['/beegfs/u/bbd1146/daten/events_b_br.h5', '/beegfs/u/bbd1146/daten/events_b_sr.h5', '/beegfs/u/bbd1146/daten/events_s_br.h5', '/beegfs/u/bbd1146/daten/events_s_sr.h5']
 
 # Load the raw event data
@@ -60,10 +64,10 @@ for i in range(len(events_np)):
 
     sorted_event = events_top20[i]
 
-    pts   = sorted_event[:20, 0]
-    etas  = sorted_event[:20, 1]
-    phis  = sorted_event[:20, 2]
-
+    mask = sorted_event[:, 0] > 0
+    pts  = sorted_event[mask, 0]
+    etas = sorted_event[mask, 1]
+    phis = sorted_event[mask, 2]
     # Create a 4-vector array for clustering
     array = ak.Array(
         {"pt": pts, "eta": etas, "phi": phis, "M": np.zeros(len(pts))},

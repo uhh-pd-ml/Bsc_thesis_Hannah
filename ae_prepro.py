@@ -83,7 +83,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 criterion = nn.MSELoss()
 
 #### Training Loop #####
-epochs = 100
+epochs = 50
 model.train()
 for epoch in range(epochs):
     total_loss = 0
@@ -115,7 +115,7 @@ with torch.no_grad():
 
 plt.figure(figsize=(6,6))
 
-plt.scatter(test_true[:, 12], test_pred[:, 12], alpha=0.1)
+plt.scatter(test_true[:, 12], test_pred[:, 12], s=1, alpha=0.5)
 plt.plot([-3, 3], [-3, 3], color='red', linestyle='--')
 plt.xlabel("Wahre Kinematik (normiert)")
 plt.ylabel("Vorhergesagte Kinematik (normiert)")
@@ -125,8 +125,10 @@ plt.close()
 
 plt.figure(figsize=(6,6))
 
-plt.scatter(test_true[:, 14], test_pred[:, 14], alpha=0.1)
+plt.scatter(test_true[:, 14], test_pred[:, 14], s=1, alpha=0.5)
 plt.plot([-3, 3], [-3, 3], color='red', linestyle='--')
+plt.xlim(-2, 4)
+plt.ylim(-2, 4)
 plt.xlabel("Wahre Kinematik (normiert)")
 plt.ylabel("Vorhergesagte Kinematik (normiert)")
 plt.title("Regression Performance (pTjet1 Approximation)")
