@@ -603,7 +603,7 @@ class Autoencoder(BaseEstimator):
         plt.close()
 
 
-    def export_to_hls(self, X_test_bkg, X_test_sig, output_dir="hls4ml_prj", backend='vitis', target='xcvc1902-vsvd1760-2mp-e-s'):
+    def export_to_hls(self, X_test_bkg, X_test_sig, output_dir="hls4ml_prj", backend='vitis', target='xcvu9p-flga2104-2L-e'):
         print("Starting hls4ml conversion...")
         
         self.model.eval()

@@ -87,8 +87,8 @@ with h5py.File('/beegfs/u/bbd1146/daten_26F/events_s_sr.h5', 'r') as f:
 X_b_sr_raw = np.concatenate([kin_b_sr, jet_b_sr], axis=1)[:, useful_indices]
 X_s_sr_raw = np.concatenate([kin_s_sr, jet_s_sr], axis=1)[:, useful_indices]
 
-X_b_sr_scaled = scaler.transform(X_b_sr_raw)
-X_s_sr_scaled = scaler.transform(X_s_sr_raw)
+X_b_sr_scaled = scaler.transform(X_b_sr_raw)[0:1]
+X_s_sr_scaled = scaler.transform(X_s_sr_raw)[0:1]
 
 # Calculate and save Reconstruction loss (MSE)
 score_background = ae_model.predict_proba(X_b_sr_scaled)
@@ -103,6 +103,28 @@ print(f"Number of Background Events (SR): {len(X_b_sr_scaled)}")
 print(f"Number of Signal Events (SR):     {len(X_s_sr_scaled)}")
 print(f"MSE Background: {np.mean(score_background):.6f}")
 print(f"MSE Signal:     {np.mean(score_signal):.6f}")
+print(f"MSE Background (Einzelwert): {score_background[0]:.6f}")
+print(f"MSE Signal (Einzelwert):     {score_signal[0]:.6f}")
+
+
+# transform() liefert die Werte nach dem Durchlauf durch den AE
+reconstructed_bkg = ae_model.transform(X_b_sr_scaled)
+
+# 2. Vergleich: Original vs. Rekonstruktion
+print("\n--- Feature Vergleich (Erstes Background Event) ---")
+print(f"{'Feature Index':<15} | {'Original (Scaled)':<20} | {'Rekonstruiert':<20}")
+print("-" * 60)
+
+for i in range(N_INPUTS):
+    orig = X_b_sr_scaled[0, i]
+    reco = reconstructed_bkg[0, i]
+    print(f"{i:<15} | {orig:<20.6f} | {reco:<20.6f}")
+
+# 3. Wenn du die Werte in der ursprünglichen physikalischen Skala willst:
+# (Also vor dem StandardScaler)
+reconstructed_unscaled = scaler.inverse_transform(reconstructed_bkg)
+print(f"\nRekonstruiertes Feature 0 (Originale Skala): {reconstructed_unscaled[0, 0]:.6f}")
+
 
 
 ###### Visualization & Analysis #######
@@ -117,4 +139,4 @@ ae_model.plot_learning_curve(f"{RUN_PATH}/CLSF_train_losses.npy", f"{RUN_PATH}/C
 ##### HLS Export ######
 # Converts the PyTorch/Keras model into C++ HLS code for FPGA deployment.
 # Compares Python-simulated quantized output against HLS-ready logic.
-s_bkg_hls, s_sig_hls, s_bkg_torch, s_sig_torch = ae_model.export_to_hls(X_b_sr_scaled, X_s_sr_scaled)
+#s_bkg_hls, s_sig_hls, s_bkg_torch, s_sig_torch = ae_model.export_to_hls(X_b_sr_scaled, X_s_sr_scaled)
