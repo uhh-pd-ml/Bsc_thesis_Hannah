@@ -2,7 +2,7 @@
 #SBATCH --job-name=hummel_run
 #SBATCH --output=/beegfs/u/bbd1146/hummel_output%J.log
 #SBATCH --error=/beegfs/u/bbd1146/hummel_error%J.log
-#SBATCH --time=2:40:00
+#SBATCH --time=0:50:00
 #SBATCH --partition=std
 #SBATCH --cpus-per-task=16
 #SBATCH --mail-type=all
@@ -13,4 +13,4 @@
 
 module load python
 source /beegfs/u/bbd1146/temp_install/bin/activate
-python h5totxt.py
+python roc_kurve_hardware/roc_kurve.py

@@ -1,0 +1,106 @@
+`timescale 1ns / 1ps
+
+module tb_top2();
+
+    // --- Signale deklarieren ---
+    reg pcie_clk_p;
+    wire pcie_clk_n;
+    reg sys_rst_n;
+    
+    // Eingangs-Signale (Slave Interface des DUT)
+    reg [511:0] s_axis_tdata;
+    reg         s_axis_tvalid;
+    reg         s_axis_tlast;
+    wire        s_axis_tready;
+    
+    // Ausgangs-Signale (Master Interface des DUT)
+    wire [511:0] m_axis_tdata;
+    wire         m_axis_tvalid;
+    reg          m_axis_tready;
+
+    // --- Takterzeugung ---
+    initial pcie_clk_p = 0;
+    always #5 pcie_clk_p = ~pcie_clk_p;
+    assign pcie_clk_n = ~pcie_clk_p; 
+
+    // --- Instanziierung des Designs (DUT) ---
+    // Ports exakt so, wie sie in deinem Wrapper vorhanden sind
+    setup_01_wrapper dut (
+        .pcle_clk_clk_n(pcie_clk_n),
+        .pcle_clk_clk_p(pcie_clk_p),
+        .sys_rst_n_0(sys_rst_n),
+        
+        // Eingang (Slave Interface)
+        .S_AXIS_0_tdata(s_axis_tdata),
+        .S_AXIS_0_tlast(s_axis_tlast),
+        .S_AXIS_0_tready(s_axis_tready),
+        .S_AXIS_0_tvalid(s_axis_tvalid),
+        
+        // Ausgang (Master Interface)
+        .M_AXIS_0_tdata(m_axis_tdata),
+        .M_AXIS_0_tready(m_axis_tready),
+        .M_AXIS_0_tvalid(m_axis_tvalid)
+    );
+    
+    // --- Stimulus Prozess (Senden und Warten) ---
+    reg [511:0] test_memory [0:999];
+    integer i;
+    
+    initial begin
+        // 1. Initialisierung
+        $readmemh("test_daten_b.txt", test_memory);
+        sys_rst_n = 0;
+        s_axis_tvalid = 0;
+        s_axis_tdata = 0;
+        s_axis_tlast = 0;
+        m_axis_tready = 1; // Wir empfangen immer
+        
+        // 2. Reset Phase
+        #500;
+        sys_rst_n = 1;
+        #500;
+        
+        $display("--- START: Sende 1000 Pakete ---");
+
+        // 3. Datenschleife
+        for (i = 0; i < 1000; i = i + 1) begin
+            @(posedge pcie_clk_p);
+            s_axis_tdata  = test_memory[i];
+            s_axis_tvalid = 1;
+            s_axis_tlast  = (i == 999);
+            
+            // Warten, falls das Design (Broadcaster/FIFO) kurzzeitig voll ist
+            while (!s_axis_tready) begin
+                @(posedge pcie_clk_p);
+            end
+        end
+        
+        for (i = 0; i < 1000; i = i + 1) begin
+            @(posedge pcie_clk_p);
+            // ??ndere die Daten dynamisch basierend auf dem Index i
+            s_axis_tdata  = test_memory[i] + i; 
+            s_axis_tvalid = 1;
+        end 
+        // 4. Senden beendet
+        @(posedge pcie_clk_p);
+        s_axis_tvalid = 0;
+        s_axis_tlast  = 0;
+        $display("--- Senden fertig bei t=%t. Warte fest 50us auf Ergebnisse ---", $time);
+    
+        // 5. Die "Sicherheits-Zeit"
+        // Hier erzwingen wir, dass die Simulation weiterl??uft, 
+        // egal was m_axis_tvalid sagt!
+        #50000; 
+        
+        $display("--- Simulation Ende durch Zeitablauf bei t=%t ---", $time);
+        $stop;
+    end
+
+    // --- Monitoring Prozess (Ausgabe in Konsole) ---
+    always @(posedge pcie_clk_p) begin
+        if (m_axis_tvalid && m_axis_tready) begin
+            $display("EMPFANGEN: Zeit=%t | Daten=%h", $time, m_axis_tdata);
+        end
+    end
+
+endmodule

@@ -6,7 +6,7 @@ from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 import h5py
 import numpy as np
-from ae_qubasis import Autoencoder
+from basis_bug import Autoencoder
 from pquant import dst_config
 
 ##### Initialization & Paths #####
@@ -20,6 +20,8 @@ LAYERS = [26]
 # Feature Selection
 #useful_indices = [0,1,2,3,5,6,9,11,18,22]
 useful_indices = list(range(26))
+
+os.makedirs(RUN_PATH, exist_ok=True)
 
 ###### Quantization & Training Config #######
 config = dst_config()
@@ -69,8 +71,12 @@ ae_model = Autoencoder(
     save_path=RUN_PATH
 )
 
+ae_model.make_perfect_identity_dummy()
+ae_model.print_weights()
+
+
 ###### Training ######
-ae_model.fit(X_train)
+#ae_model.fit(X_train)
 
 ###### Testing #######
 # Load Signal Region (SR) data for both Background (Normal) and Signal (Anomaly)
@@ -129,10 +135,10 @@ print(f"\nRekonstruiertes Feature 0 (Originale Skala): {reconstructed_unscaled[0
 
 ###### Visualization & Analysis #######
 # Generate reconstruction plots, error histograms, and ROC curves
-ae_model.plot_results(score_background, score_signal)
-ae_model.plot_loss_histogram(score_background, score_signal)
-ae_model.plot_roc_curve(score_background, score_signal)
-ae_model.plot_learning_curve(f"{RUN_PATH}/CLSF_train_losses.npy", f"{RUN_PATH}/CLSF_val_losses.npy")
+#ae_model.plot_results(score_background, score_signal)
+#ae_model.plot_loss_histogram(score_background, score_signal)
+#ae_model.plot_roc_curve(score_background, score_signal)
+#ae_model.plot_learning_curve(f"{RUN_PATH}/CLSF_train_losses.npy", f"{RUN_PATH}/CLSF_val_losses.npy")
 
 
 

@@ -47,11 +47,28 @@ class QuantizedAutoencoderModel(nn.Module):
                 )
                 current_inputs = nodes
 
+            self.apply(self._init_weights_to_onematrix)
+
+    def _init_weights_to_onematrix(self, module):
+        """Sets all layer weights to 1.0 and biases to 0.0"""
+        if hasattr(module, 'weight') and module.weight is not None:
+            torch.nn.init.eye_(module.weight.data)
+            
+        if hasattr(module, 'bias') and module.bias is not None:
+            # Biases are usually kept at 0.0, but change to 1.0 if explicitly needed
+            torch.nn.init.constant_(module.bias.data, 0.0) 
+        
+
     def forward(self, x):
+        # Prüfen, ob das Flag existiert und True ist
+        disable_relu = getattr(self, 'disable_relu_for_identity', False)
+        
         for i, layer in enumerate(self.pq_layers):
             x = layer(x)
             if i < len(self.pq_layers) - 1:
-                x = F.relu(x)
+                # Nur ausführen, wenn wir NICHT im Identitätsmodus sind
+                if not disable_relu:
+                    x = F.relu(x)
         return x
 
 
@@ -160,7 +177,63 @@ class Autoencoder(BaseEstimator):
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-                  
+
+    def print_weights(self):
+        """Präsentiert die Gewichte und Biases aller PQDense-Schichten."""
+        print("\n=== Start Gewichts-Analyse ===")
+        for i, layer in enumerate(self.model.pq_layers):
+            print(f"\n[Schicht {i}] -> PQDense ({layer.in_features} -> {layer.out_features})")
+            
+            if hasattr(layer, 'weight') and layer.weight is not None:
+                # .detach().cpu() stellt sicher, dass es vom GPU-Speicher/Gradienten-Graphen gelöst wird
+                print("Gewichts-Matrix:")
+                print(layer.weight.detach().cpu().numpy())
+            
+            if hasattr(layer, 'bias') and layer.bias is not None:
+                print("Bias-Vektor:")
+                print(layer.bias.detach().cpu().numpy())
+        print("\n=== Ende Gewichts-Analyse ===")
+
+    def make_perfect_identity_dummy(self):
+        """
+        Zwingt das Modell kompromisslos in eine perfekte Identity-Pipeline.
+        Modifiziert Parameter direkt auf Tensor-Ebene.
+        """
+        import torch
+        self.model.eval()
+        
+        # 1. ReLU-Flag setzen (für deine angepasste forward-Methode)
+        self.model.disable_relu_for_identity = True
+        print("-> ReLU-Aktivierungsfunktionen wurden strukturell deaktiviert!")
+
+        # 2. ALLE Parameter im Modell direkt an der Wurzel packen
+        with torch.no_grad():
+            for name, param in self.model.named_parameters():
+                # Handelt es sich um eine Gewichtsmatrix?
+                if 'weight' in name:
+                    if param.ndim == 2:  # Nur für Lineare/Dense Schichten
+                        torch.nn.init.eye_(param.data)
+                        param.requires_grad = False
+                        print(f"-> Parameter-Gewicht '{name}' wurde hart auf EINHEITSMATRIX gesetzt.")
+                    else:
+                        print(f"-> WARNUNG: '{name}' hat unerwartete Dimension {param.shape}")
+                
+                # Handelt es sich um einen Bias?
+                elif 'bias' in name:
+                    torch.nn.init.constant_(param.data, 0.0)
+                    param.requires_grad = False
+                    print(f"-> Parameter-Bias '{name}' wurde hart auf 0.0 gesetzt.")
+
+            # 3. Quantizer-Forward-Methoden stummschalten
+            for name, module in self.model.named_modules():
+                if hasattr(module, 'weight_quantizer') and module.weight_quantizer is not None:
+                    module.weight_quantizer.forward = lambda x: x
+                    print(f"   └── '{name}.weight_quantizer' stummgeschaltet.")
+                if hasattr(module, 'act_quantizer') and module.act_quantizer is not None:
+                    module.act_quantizer.forward = lambda x: x
+                    print(f"   └── '{name}.act_quantizer' stummgeschaltet.")
+                    
+                        
     def predict_proba(self, X, m=None):
         """Runs input data through the model and computes reconstruction
         error (MSE loss) which
