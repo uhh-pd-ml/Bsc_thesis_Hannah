@@ -6,8 +6,8 @@ from sklearn.metrics import roc_curve, auc
 # ==============================================================================
 # 1. Dateipfade definieren
 # ==============================================================================
-path_normal   = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten.csv"
-path_anormal  = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_signal.csv"
+path_normal   = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_b2.csv"
+path_anormal  = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_s2.csv"
 
 # Welchen Namen hat die Spalte in deinen CSV-Dateien?
 SPALTEN_NAME = 'Daten (Hex)' 
@@ -33,11 +33,11 @@ def load_loss_from_csv(file_path, column_name):
 # ==============================================================================
 # Normale Daten laden -> Label ist 0
 losses_normal = load_loss_from_csv(path_normal, SPALTEN_NAME)
-labels_normal = np.ones(len(losses_normal))
+labels_normal = np.zeros(len(losses_normal))
 
 # Anormale Daten laden -> Label ist 1
 losses_anormal = load_loss_from_csv(path_anormal, SPALTEN_NAME)
-labels_anormal = np.zeros(len(losses_anormal))
+labels_anormal = np.ones(len(losses_anormal))
 
 print(f"Normale Datenpunkte geladen: {len(losses_normal)}")
 print(f"Anormale Datenpunkte geladen: {len(losses_anormal)}")

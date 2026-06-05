@@ -72,23 +72,24 @@ ae_model = Autoencoder(
 ###### Training ######
 ae_model.fit(X_train)
 
-###### Testing #######
-# Load Signal Region (SR) data for both Background (Normal) and Signal (Anomaly)
-# Background in Signal Region
+
+
 with h5py.File('/beegfs/u/bbd1146/daten_26F/test_daten_b_int16.h5', 'r') as f:
     kin_b_sr = f['jet_kinematics'][:]
     jet_b_sr = f['jettiness'][:]
+
 # Signal in Signal Region
 with h5py.File('/beegfs/u/bbd1146/daten_26F/test_daten_s_int16.h5', 'r') as f:
     kin_s_sr = f['jet_kinematics'][:]
     jet_s_sr = f['jettiness'][:]
 
-# Apply the same scaling transformation used for training
-X_b_sr_raw = np.concatenate([kin_b_sr, jet_b_sr], axis=1)[:, useful_indices]
-X_s_sr_raw = np.concatenate([kin_s_sr, jet_s_sr], axis=1)[:, useful_indices]
+# 1. Zusammenfügen der geladenen int16-Arrays
+X_b_sr_int16 = np.concatenate([kin_b_sr, jet_b_sr], axis=1)[:, useful_indices]
+X_s_sr_int16 = np.concatenate([kin_s_sr, jet_s_sr], axis=1)[:, useful_indices]
 
-X_b_sr_scaled = scaler.transform(X_b_sr_raw)
-X_s_sr_scaled = scaler.transform(X_s_sr_raw)
+# WICHTIG: Rückkonvertierung von int16-Festkomma zu Float32 (durch 2^10 teilen)
+X_b_sr_scaled = X_b_sr_int16.astype(np.float32) / 2048.0
+X_s_sr_scaled = X_s_sr_int16.astype(np.float32) / 2048.0
 
 # Calculate and save Reconstruction loss (MSE)
 score_background = ae_model.predict_proba(X_b_sr_scaled)
@@ -97,37 +98,20 @@ score_signal = ae_model.predict_proba(X_s_sr_scaled)
 np.save(os.path.join(RUN_PATH, 'scores_bg.npy'), score_background)
 np.save(os.path.join(RUN_PATH, 'scores_sig.npy'), score_signal)
 
-
-###### Visualization & Analysis #######
-# Generate reconstruction plots, error histograms, and ROC curves
-ae_model.plot_results(score_background, score_signal)
-ae_model.plot_loss_histogram(score_background, score_signal)
-ae_model.plot_roc_curve(score_background, score_signal)
-ae_model.plot_learning_curve(f"{RUN_PATH}/CLSF_train_losses.npy", f"{RUN_PATH}/CLSF_val_losses.npy")
-
-
-##### HLS Export ######
-# Converts the PyTorch/Keras model into C++ HLS code for FPGA deployment.
-# Compares Python-simulated quantized output against HLS-ready logic.
-#s_bkg_hls, s_sig_hls, s_bkg_torch, s_sig_torch = ae_model.export_to_hls(X_b_sr_scaled, X_s_sr_scaled)
-
-
-
-###### Debugen ##############
 # Results
 print(f"\n--- Results ---")
 print(f"Number of Background Events (SR): {len(X_b_sr_scaled)}")
 print(f"Number of Signal Events (SR):     {len(X_s_sr_scaled)}")
-print(f"MSE Background: {np.mean(score_background):.6f}")
-print(f"MSE Signal:     {np.mean(score_signal):.6f}")
-print(f"MSE Background (Einzelwert): {score_background[0]:.6f}")
-print(f"MSE Signal (Einzelwert):     {score_signal[0]:.6f}")
+print(f"MSE Background (Mittelwert): {np.mean(score_background):.6f}")
+print(f"MSE Signal (Mittelwert):     {np.mean(score_signal):.6f}")
+print(f"MSE Background (Erstes Event): {score_background[0]:.6f}")
+print(f"MSE Signal (Erstes Event):     {score_signal[0]:.6f}")
 
 
 # transform() liefert die Werte nach dem Durchlauf durch den AE
 reconstructed_bkg = ae_model.transform(X_b_sr_scaled)
 
-# 2. Vergleich: Original vs. Rekonstruktion
+# 2. Vergleich: Original vs. Rekonstruktion (Nur für das ERSTE Event [0])
 print("\n--- Feature Vergleich (Erstes Background Event) ---")
 print(f"{'Feature Index':<15} | {'Original (Scaled)':<20} | {'Rekonstruiert':<20}")
 print("-" * 60)
@@ -137,7 +121,12 @@ for i in range(N_INPUTS):
     reco = reconstructed_bkg[0, i]
     print(f"{i:<15} | {orig:<20.6f} | {reco:<20.6f}")
 
-# 3. Wenn du die Werte in der ursprünglichen physikalischen Skala willst:
-# (Also vor dem StandardScaler)
-reconstructed_unscaled = scaler.inverse_transform(reconstructed_bkg)
-print(f"\nRekonstruiertes Feature 0 (Originale Skala): {reconstructed_unscaled[0, 0]:.6f}")
+
+
+###### Visualization & Analysis #######
+# Generate reconstruction plots, error histograms, and ROC curves
+ae_model.plot_results(score_background, score_signal)
+ae_model.plot_loss_histogram(score_background, score_signal)
+ae_model.plot_roc_curve(score_background, score_signal)
+ae_model.plot_learning_curve(f"{RUN_PATH}/CLSF_train_losses.npy", f"{RUN_PATH}/CLSF_val_losses.npy")
+

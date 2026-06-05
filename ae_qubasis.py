@@ -520,23 +520,32 @@ class Autoencoder(BaseEstimator):
 
         # Verlauf der verbleibenden Gewichte (Sparsity)
         ax[0, 0].plot(self.history["keep_ratio"], label="Remaining Weights %", color='blue')
-        ax[0, 0].set_title("Weight Pruning Progress")
+        #ax[0, 0].set_title("Weight Pruning Progress")
+        ax[0, 0].set_xlabel("Epoch", fontsize=15)
+        ax[0, 0].set_ylabel("Ratio of Remaining Weights", fontsize=15)
         ax[0, 0].legend()
 
         # Validierungs-Loss (MSE)
         ax[0, 1].plot(self.history["val_loss"], label="Val Loss (MSE)", color='orange')
-        ax[0, 1].set_title("Reconstruction Error")
+        #ax[0, 1].set_title("Reconstruction Error")
+        ax[0, 1].set_xlabel("Epoch", fontsize=15)
+        ax[0, 1].set_ylabel("Mean Squared Error (MSE)", fontsize=15)
         ax[0, 1].legend()
 
         # EBOPs (Hardware-Effizienz)
         ax[1, 1].plot(self.history["ebops"], label="EBOPs", color='green')
-        ax[1, 1].set_title("Estimated Bit Operations")
+        #ax[1, 1].set_title("Estimated Bit Operations")
+        ax[1, 1].set_xlabel("Epoch", fontsize=15)
+        ax[1, 1].set_ylabel("Estimated Bit Operations", fontsize=15)
         ax[1, 1].legend()
 
         # Histogramm der Scores
         ax[1, 0].hist(score_background, bins=50, alpha=0.5, label='Bkg', density=True)
         ax[1, 0].hist(score_signal, bins=50, alpha=0.5, label='Sig', density=True)
-        ax[1, 0].set_title("Score Distribution")
+        #ax[1, 0].set_title("Score Distribution")
+        ax[1, 0].set_xlabel("Score", fontsize=15)
+        ax[1, 0].set_ylabel("Probability Density", fontsize=15)
+        ax[1, 0].set_xlim(0, 2)
         ax[1, 0].legend()
 
 
@@ -552,11 +561,11 @@ class Autoencoder(BaseEstimator):
         plt.figure(figsize=(9, 6))
         limit = np.percentile(score_sig, 98)
         
-        plt.hist(score_bg, bins=100, density=True, alpha=0.5, label='Background (QCD)', color='royalblue', range=(0, limit))
+        plt.hist(score_bg, bins=100, density=True, alpha=0.5, label='Background (SM)', color='royalblue', range=(0, limit))
         plt.hist(score_sig, bins=100, density=True, alpha=0.6, label='Signal (BSM)', color='crimson', range=(0, limit))
 
-        plt.xlabel('Autoencoder Reconstruction Loss (MSE)', fontsize=12)
-        plt.ylabel('Probability Density', fontsize=12)
+        plt.xlabel('Reconstruction Loss (MSE)', fontsize=15)
+        plt.ylabel('Probability Density', fontsize=15)
         plt.legend(frameon=True)
         plt.grid(alpha=0.3)
         plt.tight_layout()
@@ -576,9 +585,9 @@ class Autoencoder(BaseEstimator):
 
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate (FPR)', fontsize=12)
-        plt.ylabel('True Positive Rate (TPR)', fontsize=12)
-        plt.title('Anomaly Detection Performance', fontsize=14)
+        plt.xlabel('False Positive Rate (FPR)', fontsize=15)
+        plt.ylabel('True Positive Rate (TPR)', fontsize=15)
+        #plt.title('Anomaly Detection Performance', fontsize=14)
         plt.legend(loc="lower right")
         plt.grid(alpha=0.3)
         plt.savefig(join(self.save_path, 'ROC_Kurve.png'), dpi=300)
@@ -594,9 +603,9 @@ class Autoencoder(BaseEstimator):
         plt.plot(val_losses, label='Validation', color='#ff7f0e', lw=2)
 
         #plt.yscale('log')
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss (MSE)')
-        plt.title('Autoencoder Training Progress')
+        plt.xlabel('Epochs', fontsize=15)
+        plt.ylabel('Loss (MSE)', fontsize=15)
+        #plt.title('Autoencoder Training Progress')
         plt.legend()
         plt.grid(True, which="both", alpha=0.3)
         plt.savefig(join(self.save_path, 'learning_curve.png'), bbox_inches='tight')

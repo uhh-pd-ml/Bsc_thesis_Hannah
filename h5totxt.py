@@ -15,11 +15,8 @@ scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train_raw)
 
 
-def to_fixed_point_int16(value, total_bits=16, integer_bits=6):
-    """
-    Wandelt einen Float in einen 16-Bit Integer für ap_fixed<16,6> um.
-    Das entspricht 10 Nachkommastellen (Fractional Bits).
-    """
+def to_fixed_point_int16(value, total_bits=16, integer_bits=5):
+    
     fractional_bits = total_bits - integer_bits  # 11 Bits
     
     # Skalieren: Wert mit 2^11 multiplizieren und runden
@@ -102,5 +99,5 @@ for i in range(3):
     if val_int >= 0x8000:   
         val_int -= 0x10000
 
-    reconstructed_float = val_int / 1024.0
+    reconstructed_float = val_int / 2048.0
     print(f"Feature {i}: Datei-Hex={hex_val} ({reconstructed_float:.4f}), Original={first_event_scaled[i]:.4f}")

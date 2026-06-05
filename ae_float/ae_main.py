@@ -20,7 +20,7 @@ useful_indices = list(range(26))
 
 ###### Data Preparation #######
 # Load background (b_br) training data
-with h5py.File('/beegfs/u/bbd1146/daten/events_b_br.h5', 'r') as f:
+with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_br.h5', 'r') as f:
     kinematics = f['jet_kinematics'][:]
     jettiness = f['jettiness'][:]
 
@@ -55,11 +55,11 @@ ae_model.fit(X_train)
 ###### Testing #######
 # Load Signal Region (SR) data for both Background (Normal) and Signal (Anomaly)
 # Background in Signal Region
-with h5py.File('/beegfs/u/bbd1146/daten/events_b_sr.h5', 'r') as f:
+with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_sr.h5', 'r') as f:
     kin_b_sr = f['jet_kinematics'][:]
     jet_b_sr = f['jettiness'][:]
 # Signal in Signal Region
-with h5py.File('/beegfs/u/bbd1146/daten/events_s_sr.h5', 'r') as f:
+with h5py.File('/beegfs/u/bbd1146/daten_26F/events_s_sr.h5', 'r') as f:
     kin_s_sr = f['jet_kinematics'][:]
     jet_s_sr = f['jettiness'][:]
 
