@@ -13,4 +13,4 @@
 
 module load python
 source /beegfs/u/bbd1146/temp_install/bin/activate
-python ae_main_quantinput.py
+python ae_quhmain.py

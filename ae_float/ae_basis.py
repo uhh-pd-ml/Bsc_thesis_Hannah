@@ -150,7 +150,7 @@ class Autoencoder(BaseEstimator):
                 "Conditional data not implemented for Autoencoder")
 
         reco = self.transform(X, m=m)
-        reco_error = np.sum((X - reco)**2, axis=-1)
+        reco_error = np.mean((X - reco)**2, axis=-1)
 
         return reco_error
 

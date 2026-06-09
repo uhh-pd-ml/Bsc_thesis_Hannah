@@ -23,21 +23,21 @@ useful_indices = list(range(26))
 
 ###### Quantization & Training Config #######
 config = dst_config()
-config.pruning_parameters.enable_pruning = False # Set to True for Decoupled Structured Tuning (DST)
+config.pruning_parameters.enable_pruning = True # True for DST and false for HGQ
 config.training_parameters.epochs = 50
-#config.training_parameters.fine_tuning_epochs = 50
+config.training_parameters.fine_tuning_epochs = 50
 
 config.quantization_parameters.default_data_integer_bits = 3.
 config.quantization_parameters.default_data_fractional_bits = 5.
 config.quantization_parameters.default_weight_integer_bits = 1.
 config.quantization_parameters.default_weight_fractional_bits = 6.
 config.quantization_parameters.overflow_mode_data = "SAT"
-config.quantization_parameters.overflow_mode_parameters = "SAT_SYM"
+config.quantization_parameters.overflow_mode_parameters = "SAT"
 # For HGQ
-config.quantization_parameters.use_high_granularity_quantization = True
-config.quantization_parameters.hgq_beta = 1e-8
+#config.quantization_parameters.use_high_granularity_quantization = True
+#config.quantization_parameters.hgq_beta = 1e-8
 # For DST
-#config.pruning_parameters.alpha = 5e-5
+config.pruning_parameters.alpha = 5e-5
 
 
 ###### Data Preparation #######

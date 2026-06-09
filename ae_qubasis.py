@@ -629,6 +629,16 @@ class Autoencoder(BaseEstimator):
             transpose_outputs=True
         )
         
+        hls_config['Model']['TableSize'] = 1024
+        
+        # Sicherheitshalber auch explizit für alle ReLU-Layer (Aktivierungsfunktionen) setzen,
+        # da hls4ml diese manchmal in den 'LayerName'-Unterordnern separat trackt:
+        if 'LayerName' in hls_config:
+            for layer_name, layer_cfg in hls_config['LayerName'].items():
+                if 'relu' in layer_name.lower():
+                    layer_cfg['TableSize'] = 1024
+
+
         # convert model
         hls_model = convert_from_pytorch_model(
             self.model,
@@ -640,7 +650,7 @@ class Autoencoder(BaseEstimator):
         )
         
         hls_model.compile()
-
+        hls_model.build(synth=True, cosim=True)
         # Background
         X_bkg_c = np.ascontiguousarray(X_test_bkg).astype(np.float32)
         p_hls_bkg = hls_model.predict(X_bkg_c)
@@ -668,12 +678,18 @@ class Autoencoder(BaseEstimator):
         # Plot für die Hardware-Ergebnisse (HLS)
         ax[0].hist(score_bkg_hls, bins=50, alpha=0.5, label='Bkg', density=True)
         ax[0].hist(score_sig_hls, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[0].set_xlim(0, 6)
+        ax[0].set_xlabel("Score", fontsize=15)
+        ax[0].set_ylabel("Probability Density", fontsize=15)
         ax[0].legend()
         ax[0].set_title("HLS Hardware Performance")
 
         # Plot für die Software-Ergebnisse (Torch)
         ax[1].hist(score_bkg_torch, bins=50, alpha=0.5, label='Bkg', density=True)
         ax[1].hist(score_sig_torch, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[1].set_xlim(0, 6)
+        ax[1].set_xlabel("Score", fontsize=15)
+        ax[1].set_ylabel("Probability Density", fontsize=15)
         ax[1].legend()
         ax[1].set_title("PyTorch Software Performance")
 
