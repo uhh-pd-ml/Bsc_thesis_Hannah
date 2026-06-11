@@ -13,4 +13,5 @@
 
 module load python
 source /beegfs/u/bbd1146/temp_install/bin/activate
+#python roc_kurve_hardware/roc_kurve.py
 python ae_quhmain.py

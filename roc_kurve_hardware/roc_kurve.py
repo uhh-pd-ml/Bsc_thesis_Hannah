@@ -6,8 +6,8 @@ from sklearn.metrics import roc_curve, auc
 # ==============================================================================
 # 1. Dateipfade definieren
 # ==============================================================================
-path_normal   = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_b2.csv"
-path_anormal  = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_s2.csv"
+path_normal   = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_bdst2.csv"
+path_anormal  = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_sdst2.csv"
 
 # Welchen Namen hat die Spalte in deinen CSV-Dateien?
 SPALTEN_NAME = 'Daten (Hex)' 

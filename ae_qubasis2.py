@@ -27,33 +27,37 @@ from sklearn.preprocessing import StandardScaler
 
 
 class QuantizedAutoencoderModel(nn.Module):
-    def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1, 5, 26)):
-            super().__init__()
-            self.pq_layers = nn.ModuleList()
+    def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1, 4, 11)):
+        super().__init__()
+        self.pq_layers = nn.ModuleList()
+        self.relus = nn.ModuleList() # <--- Neu: Eine Liste für die ReLUs
+        
+        current_inputs = n_inputs
+        for i, nodes in enumerate(layers):
+            is_first = (i == 0)
+            is_last = (i == len(layers) - 1)
             
-            current_inputs = n_inputs
-            for i, nodes in enumerate(layers):
-                is_first = (i == 0)
-                is_last = (i == len(layers) - 1)
-                
-                self.pq_layers.append(
-                    PQDense(
-                        config, current_inputs, nodes,
-                        in_quant_bits=in_out_bits if is_first else None,
-                        out_quant_bits=in_out_bits if is_last else None,
-                        quantize_output=is_last,
-                        enable_pruning=True
-                    )
+            self.pq_layers.append(
+                PQDense(
+                    config, current_inputs, nodes,
+                    in_quant_bits=in_out_bits if is_first else None,
+                    out_quant_bits=in_out_bits if is_last else None,
+                    quantize_output=is_last,
+                    enable_pruning=True
                 )
-                current_inputs = nodes
+            )
+            # Für jedes Layer außer dem letzten ein explizites ReLU-Modul anlegen
+            if not is_last:
+                self.relus.append(nn.ReLU())
+                
+            current_inputs = nodes
 
     def forward(self, x):
         for i, layer in enumerate(self.pq_layers):
             x = layer(x)
             if i < len(self.pq_layers) - 1:
-                x = F.relu(x)
+                x = self.relus[i](x) # <--- Neu: Expliziter Modul-Aufruf
         return x
-
 
 class Autoencoder(BaseEstimator):
     """An autoencoder based on torch but wrapped such that it
@@ -534,9 +538,9 @@ class Autoencoder(BaseEstimator):
 
         # EBOPs (Hardware-Effizienz)
         ax[1, 1].plot(self.history["ebops"], label="EBOPs", color='green')
-        #ax[1, 1].set_title("Effective Bit Operations")
+        #ax[1, 1].set_title("Estimated Bit Operations")
         ax[1, 1].set_xlabel("Epoch", fontsize=15)
-        ax[1, 1].set_ylabel("Effective Bit Operations", fontsize=15)
+        ax[1, 1].set_ylabel("Estimated Bit Operations", fontsize=15)
         ax[1, 1].legend()
 
         # Histogramm der Scores
@@ -620,6 +624,9 @@ class Autoencoder(BaseEstimator):
         output_dir = join(self.save_path, "hls_project")
         os.makedirs(output_dir, exist_ok=True)
         
+        # 1. Konvertierung zu contiguous arrays direkt am Anfang (wichtig für die Reihenfolge!)
+        X_bkg_c = np.ascontiguousarray(X_test_bkg).astype(np.float32)
+        X_sig_c = np.ascontiguousarray(X_test_sig).astype(np.float32)
         
         # hls4ml config
         hls_config = config_from_pytorch_model(
@@ -630,6 +637,12 @@ class Autoencoder(BaseEstimator):
             transpose_outputs=True
         )
         
+        hls_config['Model']['table_size'] = 1024
+        
+        if 'LayerName' in hls_config:
+            for layer_name, layer_cfg in hls_config['LayerName'].items():
+                if 'relu' in layer_name.lower():
+                    layer_cfg['table_size'] = 0
 
         # convert model
         hls_model = convert_from_pytorch_model(
@@ -643,6 +656,17 @@ class Autoencoder(BaseEstimator):
         
         hls_model.compile()
         
+        # 2. Testdaten für Vivado vorbereiten und wegschreiben
+        # Wir begrenzen das auf max. 500 Samples pro Klasse, damit die RTL-Simulation flüssig läuft
+        n_samples_sim = min(500, len(X_bkg_c), len(X_sig_c))
+        X_test_combined = np.concatenate([X_bkg_c[:n_samples_sim], X_sig_c[:n_samples_sim]], axis=0)
+        
+        tb_data_dir = os.path.join(output_dir, 'tb_data')
+        os.makedirs(tb_data_dir, exist_ok=True)
+
+        # Hier die korrigierten Variablen und Pfade nutzen:
+        np.savetxt(os.path.join(tb_data_dir, 'tb_input_features.dat'), X_test_combined.reshape(-1), fmt='%f')
+        np.savetxt(os.path.join(tb_data_dir, 'tb_output_predictions.dat'), X_test_combined.reshape(-1), fmt='%f')
 
         # 3. Predictions berechnen (auf den vollständigen Datensätzen für saubere Plots)
         # Background
@@ -689,7 +713,7 @@ class Autoencoder(BaseEstimator):
 
         plt.tight_layout()
         plt.savefig(join(self.save_path, 'hls_comparison.png'))
-        plt.close()
-        
+        plt.close() # Schließt die Figure, um Speicher zu sparen
+
         self.model.to(self.device)
         return score_bkg_hls, score_sig_hls, score_bkg_torch, score_sig_torch
