@@ -27,9 +27,9 @@ config.pruning_parameters.enable_pruning = True # True for DST and false for HGQ
 config.training_parameters.epochs = 50
 config.training_parameters.fine_tuning_epochs = 50
 
-config.quantization_parameters.default_data_integer_bits = 3.
-config.quantization_parameters.default_data_fractional_bits = 5.
-config.quantization_parameters.default_weight_integer_bits = 1.
+config.quantization_parameters.default_data_integer_bits = 4.
+config.quantization_parameters.default_data_fractional_bits = 11.
+config.quantization_parameters.default_weight_integer_bits = 4.
 config.quantization_parameters.default_weight_fractional_bits = 6.
 config.quantization_parameters.overflow_mode_data = "SAT"
 config.quantization_parameters.overflow_mode_parameters = "SAT"

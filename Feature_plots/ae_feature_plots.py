@@ -13,9 +13,20 @@ with h5py.File('/beegfs/u/bbd1146/daten_26F/events_s_sr.h5', 'r') as f:
     kin_s_sr = f['jet_kinematics'][:]
     jet_s_sr = f['jettiness'][:]
 
+with h5py.File('/beegfs/u/bbd1146/daten_26F/events_b_br.h5', 'r') as f:
+    kin_b_br = f['jet_kinematics'][:]
+    jet_b_br = f['jettiness'][:]
+
+
+with h5py.File('/beegfs/u/bbd1146/daten_26F/events_s_br.h5', 'r') as f:
+    kin_s_br = f['jet_kinematics'][:]
+    jet_s_br = f['jettiness'][:]
+
 # Jettiness und kinematics kombinieren
-all_features_b = np.concatenate([kin_b_sr, jet_b_sr], axis=1)
-all_features_s = np.concatenate([kin_s_sr, jet_s_sr], axis=1)
+all_features_b_sr = np.concatenate([kin_b_sr, jet_b_sr], axis=1)
+all_features_s_sr = np.concatenate([kin_s_sr, jet_s_sr], axis=1)
+all_features_b_br = np.concatenate([kin_b_br, jet_b_br], axis=1)
+all_features_s_br = np.concatenate([kin_s_br, jet_s_br], axis=1)
 
 
 # Namen für die Achsen
@@ -39,6 +50,7 @@ groups = [
     {"indices": [22, 23, 24, 25], "title": "Jet 2 subjettiness"}
 ]
 
+os.makedirs("/beegfs/u/bbd1146/plots_gesamt", exist_ok=True)
 
 for group in groups:
     indices = group["indices"]
@@ -54,16 +66,36 @@ for group in groups:
     for i, idx in enumerate(indices):
         ax = axes[i]
         # Histogramme plotten (normiert auf Dichte für besseren Vergleich)
-        ax.hist(all_features_b[:, idx], bins=40, alpha=0.5, label='Background', color='blue', density=False)
-        ax.hist(all_features_s[:, idx], bins=40, alpha=0.5, label='Signal', color='red', density=False)
+        all_vals = np.concatenate([
+            all_features_b_sr[:, idx], all_features_s_sr[:, idx],
+            all_features_b_br[:, idx], all_features_s_br[:, idx]
+        ])
+        all_vals = all_vals[np.isfinite(all_vals)]
+        bins = np.linspace(np.min(all_vals), np.max(all_vals), 40) if len(all_vals) > 0 else 40
+
+        # --- BACKGROUND (Alle in BLAU) ---
+        # Signal Region (SR) -> Durchgezogene Linie
+        ax.hist(all_features_b_sr[:, idx], bins=bins, histtype='step', linestyle='-', linewidth=2,
+                label='Background (SR)', color='blue', alpha=0.9, density=True)
+        # Background Region (BR) -> Gestrichelte/Gepunktete Linie
+        ax.hist(all_features_b_br[:, idx], bins=bins, histtype='step', linestyle='--', linewidth=1.5,
+                label='Background (BR)', color='blue', alpha=0.6, density=True)
+        
+        # --- SIGNAL (Alle in ROT) ---
+        # Signal Region (SR) -> Durchgezogene Linie
+        ax.hist(all_features_s_sr[:, idx], bins=bins, histtype='step', linestyle='-', linewidth=2,
+                label='Signal (SR)', color='red', alpha=0.9, density=True)
+        # Background Region (BR) -> Gestrichelte/Gepunktete Linie
+        ax.hist(all_features_s_br[:, idx], bins=bins, histtype='step', linestyle='--', linewidth=1.5,
+                label='Signal (BR)', color='red', alpha=0.6, density=True)
         
         ax.set_title(f"Feature {idx}: {feature_names[idx]}")
-        ax.legend(fontsize='small')
+        ax.legend(fontsize='x-small', loc='upper right')
         ax.grid(alpha=0.3)
         #ax.set_yscale('log')
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    save_path = os.path.join("plots_input_signal_odichte", f"plot_{group['title']}.png")
+    save_path = os.path.join("/beegfs/u/bbd1146/plots_gesamt", f"plot_{group['title']}.png")
     plt.savefig(save_path, dpi=150)
     plt.close() 
 

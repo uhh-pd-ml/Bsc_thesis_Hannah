@@ -1,6 +1,7 @@
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,7 +14,8 @@ from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from pquant.core.torch.layers import PQDense
+#from pquant.core.torch.layers import PQDense
+from pquant.layers import PQDense
 from pquant import get_model_losses, get_layer_keep_ratio
 from pquant import get_ebops
 from pquant import train_model, apply_final_compression
@@ -27,7 +29,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 class QuantizedAutoencoderModel(nn.Module):
-    def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1, 5, 26)):
+    def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1, 4, 11)):
             super().__init__()
             self.pq_layers = nn.ModuleList()
             
@@ -342,16 +344,14 @@ class Autoencoder(BaseEstimator):
                 for data in testloader:
                     inputs = data[0].to(device)
                     outputs = model(inputs)
-                    val_loss += loss_function(outputs, inputs).item()
+
+                    recon_loss = loss_function(outputs, inputs)
+                    pquant_loss = get_model_losses(model, torch.tensor(0.).to(device))
+                    loss = recon_loss + pquant_loss
+                    val_loss += loss.item()
                     
             avg_loss = val_loss / len(testloader)
             keep_ratio = get_layer_keep_ratio(model).item()
-            
-
-
-            # History tracken
-            self.history["val_loss"].append(avg_loss)
-            self.history["keep_ratio"].append(keep_ratio)
             #self.history["ebops"].append(get_ebops(model).detach().cpu().numpy())
 
             calc_heavy_metrics = (epoch % 10 == 0)
@@ -367,7 +367,7 @@ class Autoencoder(BaseEstimator):
                 self._save_model(self._model_path(epoch))
 
             if self.verbose:
-                print(f"Epoch {epoch}: Val Loss {avg_loss:.6f} | Ratio {self.history['keep_ratio'][-1]:.2%}")
+                print(f"Epoch {epoch}: Val Loss {avg_loss:.6f} | Ratio {keep_ratio:.2%}")
             
             return avg_loss
         
@@ -643,13 +643,12 @@ class Autoencoder(BaseEstimator):
         
         hls_model.compile()
         
-
-        # 3. Predictions berechnen (auf den vollständigen Datensätzen für saubere Plots)
         # Background
+        X_bkg_c = np.ascontiguousarray(X_test_bkg).astype(np.float32)
         p_hls_bkg = hls_model.predict(X_bkg_c)
         score_bkg_hls = np.mean((X_bkg_c - p_hls_bkg)**2, axis=-1)
-        
         # Signal
+        X_sig_c = np.ascontiguousarray(X_test_sig).astype(np.float32)
         p_hls_sig = hls_model.predict(X_sig_c)
         score_sig_hls = np.mean((X_sig_c - p_hls_sig)**2, axis=-1)
 
@@ -689,7 +688,7 @@ class Autoencoder(BaseEstimator):
 
         plt.tight_layout()
         plt.savefig(join(self.save_path, 'hls_comparison.png'))
-        plt.close()
-        
+        plt.close() 
+
         self.model.to(self.device)
         return score_bkg_hls, score_sig_hls, score_bkg_torch, score_sig_torch

@@ -6,11 +6,14 @@ from sklearn.metrics import roc_curve, auc
 # ==============================================================================
 # 1. Dateipfade definieren
 # ==============================================================================
-path_normal   = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_bdst2.csv"
-path_anormal  = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_sdst2.csv"
+path_normal   = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_bhgq.csv"
+path_anormal  = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/ausgangs_daten_shgq.csv"
+#path_normal   = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/autoencoder_results_b_hgq.csv"
+#path_anormal  = "/home/bbd1146/Bsc_thesis_Hannah/roc_kurve_hardware/autoencoder_results_s_hgq.csv"
 
 # Welchen Namen hat die Spalte in deinen CSV-Dateien?
 SPALTEN_NAME = 'Daten (Hex)' 
+#SPALTEN_NAME = 'Hex_Data'
 
 # ==============================================================================
 # 2. Hilfsfunktion zum Einlesen und Konvertieren der Hex-Werte in Integer/Loss
@@ -32,11 +35,11 @@ def load_loss_from_csv(file_path, column_name):
 # 3. Daten laden und Labels (Ground Truth) erstellen
 # ==============================================================================
 # Normale Daten laden -> Label ist 0
-losses_normal = load_loss_from_csv(path_normal, SPALTEN_NAME)
+losses_normal = load_loss_from_csv(path_normal, SPALTEN_NAME)[:953]
 labels_normal = np.zeros(len(losses_normal))
 
 # Anormale Daten laden -> Label ist 1
-losses_anormal = load_loss_from_csv(path_anormal, SPALTEN_NAME)
+losses_anormal = load_loss_from_csv(path_anormal, SPALTEN_NAME)[:953]
 labels_anormal = np.ones(len(losses_anormal))
 
 print(f"Normale Datenpunkte geladen: {len(losses_normal)}")
@@ -59,21 +62,21 @@ roc_auc = auc(fpr, tpr)
 # ==============================================================================
 # 5. ROC-Kurve plotten
 # ==============================================================================
-plt.figure(figsize=(8, 6))
-plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC-Kurve (AUC = {roc_auc:.4f})')
-plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--', label='Zufall (AUC = 0.5)')
+plt.figure(figsize=(7, 7))
+plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'AE Model (AUC = {roc_auc:.3f})')
+plt.plot([0, 1], [0, 1], color='navy', lw=1.5, linestyle='--', label='Random Classifier')
 
 plt.xlim([0.0, 1.0])
 plt.ylim([0.0, 1.05])
-plt.xlabel('FPR')
-plt.ylabel('TPR')
-plt.title('ROC-Kurve')
-plt.legend(loc="lower right")
+plt.xlabel('False Positive Rate (FPR)', fontsize=15)
+plt.ylabel('True Positiv Rate (TPR)', fontsize=15)
+#plt.title('ROC-Kurve')
+plt.legend(loc="lower right", fontsize='large')
 plt.grid(True, linestyle=':', alpha=0.6)
 
 # Speichern im garantiert beschreibbaren Beegfs-Temp-Verzeichnis
-plt.savefig("/beegfs/u/bbd1146/roc_kurve.png", dpi=300)
-print("\n[INFO] Grafik erfolgreich unter /beegfs/u/bbd1146/roc_kurve.png gespeichert.")
+plt.savefig("/beegfs/u/bbd1146/roc_kurve_hs_hgq_953.png", dpi=300)
+
 
 # ==============================================================================
 # 6. Optimalen Hardware-Schwellenwert bestimmen
@@ -83,7 +86,7 @@ optimal_idx = np.argmax(tpr - fpr)
 optimal_threshold = thresholds[optimal_idx]
 
 print("\n--- Auswertung ---")
-print(f"Berechneter AUC-Wert: {roc_auc:.4f}")
+print(f"Berechneter AUC-Wert: {roc_auc:.3f}")
 print(f"Optimaler Loss-Schwellenwert für deinen FPGA (Dezimal): {optimal_threshold}")
 
 # Da wir wissen, dass wir Hex-Daten verarbeitet haben, wandeln wir den Threshold direkt wieder in Hex um:
