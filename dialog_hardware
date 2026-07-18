@@ -1,0 +1,153 @@
+###### introduction ######
+The dialog between the PC and the FPGA via JTAG:
+Input: The data are loaded into a buffer on the FPGA, and the design is started only once all the data are present in the buffer.
+Output: The reconstruction error is saved as an output in another buffer and is then being read.
+
+
+###### input #######
+set file_path "/afs/desy.de/user/u/uh2ml4l1/scratch/Hannah/project_main/test_daten_s_n.txt" ;
+set fifo_base_addr 0x44A00000;
+
+set tx_fifo_reg [expr {$fifo_base_addr + 0x10}]
+set tx_len_reg [expr {$fifo_base_addr + 0x14}]
+
+set jtag_master [get_hw_axis hw_axi_1]
+
+set fp [open $file_path r]
+
+set total_word_count 0
+set word_count 0
+set data_packet {}
+
+while {[gets $fp line] >= 0} {
+    set hex_val [string trim $line]
+    if {$hex_val == ""} {continue}
+    
+    lappend data_packet "0x$hex_val"
+    incr word_count
+    incr total_word_count
+
+    if {$word_count == 16} {
+
+        foreach word $data_packet {
+            create_hw_axi_txn write_word $jtag_master \
+                -force \
+                -type WRITE \
+                -address [format "0x%08X" $tx_fifo_reg] \
+                -data [list $word] \
+                -len 1
+            run_hw_axi write_word
+            delete_hw_axi_txn write_word
+        }
+
+        after 1
+
+        set data_packet {}
+        set word_count 0
+        
+        set current_event [expr {$total_word_count / 16}]
+        
+        if {[expr {$current_event % 50}] == 0 || $current_event == 10000} {
+            puts "Event $current_event in TX-FIFO"
+        }
+
+        if {$current_event == 1000} {
+            puts "Limit of 1000 Events"
+            break
+        }
+    }
+}
+
+close $fp
+puts "$total_word_count events in FIFO"
+
+
+set total_bytes [expr {$total_word_count * 4}]
+set hex_bytes [format "0x%08X" $total_bytes]
+
+create_hw_axi_txn trigger_send $jtag_master \
+    -force \
+    -type WRITE \
+    -address [format "0x%08X" $tx_len_reg] \
+    -data [list $hex_bytes] \
+    -len 1
+run_hw_axi trigger_send
+delete_hw_axi_txn trigger_send
+
+after 80
+
+puts "[expr {$total_word_count / 16}] events finished"
+
+
+
+
+##### output ########
+set fifo_base_addr 0x44A00000
+
+set output_csv "/afs/desy.de/user/u/uh2ml4l1/scratch/Hannah/project_main/autoencoder_results_s_hgq.csv"
+
+set rx_occupancy_reg [expr {$fifo_base_addr + 0x1C}] ;
+set rx_data_reg      [expr {$fifo_base_addr + 0x20}] ;
+
+set jtag_master [get_hw_axis hw_axi_1]
+
+set fp_out [open $output_csv w]
+puts $fp_out "Event_ID,Hex_Data"
+
+
+create_hw_axi_txn read_occ $jtag_master -force -type READ -address [format "0x%08X" $rx_occupancy_reg] -len 1
+run_hw_axi read_occ
+set occ_val [get_property DATA [get_hw_axi_txns read_occ]]
+delete_hw_axi_txn read_occ
+
+set words_available [expr 0x$occ_val]
+puts "Events found: $words_available"
+
+if {$words_available > 0} {
+    set num_events [expr {$words_available / 16}]
+    
+    for {set event_nr 1} {$event_nr <= $num_events} {incr event_nr} {
+        set event_line ""
+        
+        for {set word_idx 0} {$word_idx < 16} {incr word_idx} {
+            create_hw_axi_txn read_single $jtag_master -force -type READ -address [format "0x%08X" $rx_data_reg] -len 1
+            run_hw_axi read_single
+            set single_word [get_property DATA [get_hw_axi_txns read_single]]
+            delete_hw_axi_txn read_single
+            
+            set event_line "$single_word$event_line"
+        }
+        
+        puts "Event [format "%02d" $event_nr]: $event_line"
+        puts $fp_out "$event_nr,$event_line"
+    }
+    
+    set remaining_words [expr {$words_available % 16}]
+    if {$remaining_words > 0} {
+        puts "Delete $remaining_words uncompleted events"
+        for {set i 0} {$i < $remaining_words} {incr i} {
+            create_hw_axi_txn flush_cmd $jtag_master -force -type READ -address [format "0x%08X" $rx_data_reg] -len 1
+            run_hw_axi flush_cmd
+            delete_hw_axi_txn flush_cmd
+        }
+    }
+
+} else {
+    puts "The FIFO is empty"
+}
+
+close $fp_out
+
+
+
+#### check #####
+
+set rx_occupancy_reg [expr {0x44A00000 + 0x1C}]
+set jtag_master [get_hw_axis hw_axi_1]
+
+create_hw_axi_txn check_empty $jtag_master -force -type READ -address [format "0x%08X" $rx_occupancy_reg] -len 1
+run_hw_axi check_empty
+set occ_val [get_property DATA [get_hw_axi_txns check_empty]]
+delete_hw_axi_txn check_empty
+
+puts "Number of evnets in the FIFO: [expr 0x$occ_val]"

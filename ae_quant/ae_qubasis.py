@@ -1,37 +1,60 @@
 import numpy as np
 import random
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+import os
 from os import makedirs
 from os.path import join
 from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
+from pquant.core.torch.layers import PQDense
+#from pquant.layers import PQDense
+from pquant import get_model_losses, get_layer_keep_ratio
+from pquant import get_ebops
+from pquant import train_model, apply_final_compression
+
+import hls4ml
+from hls4ml.utils import config_from_pytorch_model
+from hls4ml.converters import convert_from_pytorch_model
+
 from sklearn.metrics import roc_curve, auc
-import matplotlib.pyplot as plt
+from sklearn.preprocessing import StandardScaler
 
 
-class AutoencoderModel(nn.Module):
-    """A PyTorch module implementing a simple feed-forward neural network."""
-    def __init__(self, layers=[32, 16, 4, 16, 32], n_inputs=10):
-        super().__init__()
+class QuantizedAutoencoderModel(nn.Module):
+    def __init__(self, config, layers=[32, 16, 4, 16, 32], n_inputs=10, in_out_bits=(1, 4, 11)):
+            super().__init__()
+            self.pq_layers = nn.ModuleList()
+            
+            current_inputs = n_inputs
+            for i, nodes in enumerate(layers):
+                is_first = (i == 0)
+                is_last = (i == len(layers) - 1)
+                
+                self.pq_layers.append(
+                    PQDense(
+                        config, current_inputs, nodes,
+                        in_quant_bits=in_out_bits if is_first else None,
+                        out_quant_bits=in_out_bits if is_last else None,
+                        quantize_output=is_last,
+                        enable_pruning=True
+                    )
+                )
+                current_inputs = nodes
 
-        self.layers = []
-        for i, nodes in enumerate(layers):
-            self.layers.append(nn.Linear(n_inputs, nodes))
-            # Apply ReLU to all but the final reconstruction layer
-            if (i < (len(layers) - 1)):
-                self.layers.append(nn.ReLU())
-            n_inputs = nodes
-
-        self.model_stack = nn.Sequential(*self.layers)
-
-    def forward(self, X):
-        return self.model_stack(X)
+    def forward(self, x):
+        for i, layer in enumerate(self.pq_layers):
+            x = layer(x)
+            if i < len(self.pq_layers) - 1:
+                x = F.relu(x)
+        return x
 
 
 class Autoencoder(BaseEstimator):
@@ -75,6 +98,7 @@ class Autoencoder(BaseEstimator):
 
     def __init__(
             self,
+            config,
             save_path=None,
             load=False,
             n_inputs=8,
@@ -88,6 +112,7 @@ class Autoencoder(BaseEstimator):
             epochs=100,
             verbose=False):
 
+        self.config = config
         self.save_path = save_path
         if save_path is not None:
             self.clsf_model_path = join(save_path, "AE_models")
@@ -97,12 +122,6 @@ class Autoencoder(BaseEstimator):
         self.layers = layers
         self.n_inputs = n_inputs
         self.lr = lr
-
-        self.model = AutoencoderModel(layers, n_inputs=n_inputs)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
-        self.loss = F.mse_loss
-        self.no_gpu = no_gpu
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() and not no_gpu else "cpu")
         self.early_stopping = early_stopping
         self.patience = patience
         self.val_split = val_split
@@ -110,23 +129,40 @@ class Autoencoder(BaseEstimator):
         self.epochs = epochs
         self.verbose = verbose
 
-        self.model.to(self.device)
-        self.model.eval()
+        self.device = torch.device("cuda" if torch.cuda.is_available() and not no_gpu else "cpu")
 
+        self.model = QuantizedAutoencoderModel(config, layers=layers, n_inputs=n_inputs)
+
+        
+        params = list(self.model.named_parameters())
+        self.optimizer = optim.Adam([
+            {"params": [v for n, v in params if "threshold" in n and v.requires_grad], "weight_decay": 0},
+            {"params": [v for n, v in params if "threshold" not in n and v.requires_grad], "weight_decay": 1e-4}
+        ], lr=self.lr)
+
+
+        self.loss = F.mse_loss
+        self.no_gpu = no_gpu
+        
+        self.history = {"train_loss": [],"keep_ratio": [], "val_loss": [], "val_accuracies": [],"ebops": []}
+
+        self.model.to(self.device)
+        self.model(torch.randn(1, n_inputs).to(self.device))
+        # defaulting to eval mode, switching to train mode in fit()
+        self.model.eval()
         self.load = load
 
         if load:
             self.load_best_model()
 
     def set_seed(seed=42):
-        """Sets seeds for reproducibility across numpy, random, and torch."""
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
+                  
     def predict_proba(self, X, m=None):
         """Runs input data through the model and computes reconstruction
         error (MSE loss) which
@@ -250,7 +286,7 @@ class Autoencoder(BaseEstimator):
                                  "not provided!")
             else:
                 X_train, X_val = train_test_split(
-                    X, test_size=self.val_split, shuffle=True, random_state=42)
+                    X, test_size=self.val_split, shuffle=True)
         else:
             X_train = X.copy()
 
@@ -265,91 +301,103 @@ class Autoencoder(BaseEstimator):
 
         # build data loader out of numpy arrays
 
-        X_train_torch = torch.from_numpy(
-            X_train).type(torch.FloatTensor).to(self.device)
+        X_train_torch = torch.from_numpy(X_train).type(torch.FloatTensor).to(self.device)
         X_train_dataset = torch.utils.data.TensorDataset(X_train_torch)
-        train_loader = torch.utils.data.DataLoader(
-            X_train_dataset, batch_size=self.batch_size, shuffle=True)
+        train_loader = torch.utils.data.DataLoader(X_train_dataset, batch_size=self.batch_size, shuffle=True)
 
-        X_val_torch = torch.from_numpy(
-            X_val).type(torch.FloatTensor).to(self.device)
+        X_val_torch = torch.from_numpy(X_val).type(torch.FloatTensor).to(self.device)
         X_val_dataset = torch.utils.data.TensorDataset(X_val_torch)
-        val_loader = torch.utils.data.DataLoader(
-            X_val_dataset, batch_size=self.batch_size, shuffle=True)
+        val_loader = torch.utils.data.DataLoader(X_val_dataset, batch_size=self.batch_size, shuffle=True)
 
+        
         # training loop
-        self.model.train()
-        for epoch in range(self.epochs if self.epochs is not None else 10000):
-            print('\nEpoch: {}'.format(epoch))
-            pbar = tqdm(total=len(train_loader.dataset))
-            epoch_train_loss = 0.
-            epoch_val_loss = 0.
+        def pquant_train_step(model, trainloader, device, loss_function, optimizer, epoch, **kwargs):
+            model.train()
+            total_loss = 0
+            for data in trainloader:
+                inputs = data[0].to(device)
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                
+                # Loss
+                recon_loss = loss_function(outputs, inputs)
+                pquant_loss = get_model_losses(model, torch.tensor(0.).to(device))
+                
+                loss = recon_loss + pquant_loss
+                loss.backward()
+                optimizer.step()
+                total_loss += loss.item()
 
-            for i, batch in enumerate(train_loader):
-
-                batch_inputs = batch[0]
-                batch_inputs = batch_inputs.to(self.device)
-
-                self.optimizer.zero_grad()
-                batch_outputs = self.model(batch_inputs)
-                batch_loss = self.loss(batch_outputs, batch_inputs)
-                batch_loss.backward()
-                self.optimizer.step()
-                epoch_train_loss += batch_loss.item()
-                if self.verbose:
-                    pbar.update(batch_inputs.size(0))
-                    pbar.set_description(
-                        "Train loss: {:.6f}".format(
-                            epoch_train_loss / (i + 1)))
-
-            epoch_train_loss /= (i + 1)
-            if self.verbose:
-                pbar.close()
-
-            with torch.no_grad():
-                self.model.eval()
-                for i, batch in enumerate(val_loader):
-
-                    batch_inputs = batch[0]
-
-                    batch_inputs = batch_inputs.to(self.device)
-
-                    batch_outputs = self.model(batch_inputs)
-                    batch_loss = self.loss(batch_outputs, batch_inputs)
-                    epoch_val_loss += batch_loss.item()
-                epoch_val_loss /= (i + 1)
-
-            print("Validation loss:", epoch_val_loss)
-
-            if epoch == 0:
-                train_losses = np.array([epoch_train_loss])
-                val_losses = np.array([epoch_val_loss])
-            else:
-                train_losses = np.concatenate(
-                    (train_losses, np.array([epoch_train_loss])))
-                val_losses = np.concatenate(
-                    (val_losses, np.array([epoch_val_loss])))
+            avg_loss = total_loss / len(trainloader)
+            self.history["train_loss"].append(avg_loss)
 
             if self.save_path is not None:
-                np.save(self._train_loss_path(),
-                        train_losses)
-                np.save(self._val_loss_path(),
-                        val_losses)
+                np.save(self._train_loss_path(), np.array(self.history["train_loss"]))
+
+            return avg_loss
+
+        # validation loop
+        def pquant_val_step(model, testloader, device, loss_function, epoch, **kwargs):
+            model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for data in testloader:
+                    inputs = data[0].to(device)
+                    outputs = model(inputs)
+
+                    val_loss += loss_function(outputs, inputs).item()
+                    
+            avg_loss = val_loss / len(testloader)
+            keep_ratio = get_layer_keep_ratio(model).item()
+             # History tracken
+            self.history["val_loss"].append(avg_loss)
+            self.history["keep_ratio"].append(keep_ratio)
+            #self.history["ebops"].append(get_ebops(model).detach().cpu().numpy())
+
+            calc_heavy_metrics = (epoch % 10 == 0)
+            if calc_heavy_metrics or epoch == self.epochs:
+                current_ebops = get_ebops(model).item()
+                self.history["ebops"].append(current_ebops)
+            else:
+                last_ebops = self.history["ebops"][-1] if self.history["ebops"] else 0
+                self.history["ebops"].append(last_ebops)
+
+            if self.save_path is not None:
+                np.save(self._val_loss_path(), np.array(self.history["val_loss"]))
                 self._save_model(self._model_path(epoch))
 
-            if self.early_stopping:
-                if epoch > self.patience:
-                    if np.all(val_losses[-self.patience:] >
-                              val_losses[-self.patience - 1]):
-                        print("Early stopping at epoch", epoch)
-                        break
+            if self.verbose:
+                print(f"Epoch {epoch}: Val Loss {avg_loss:.6f} | Ratio {keep_ratio:.2%}")
+            
+            return avg_loss
+        
+        
+        # Starting training
+        train_model(
+            model=self.model,
+            config=self.config,
+            train_func=pquant_train_step,
+            valid_func=pquant_val_step,
+            trainloader=train_loader,
+            testloader=val_loader,
+            device=self.device,
+            loss_function=self.loss,
+            optimizer=self.optimizer,
+            input_shape=(self.n_inputs,),
+            gather_ebops=True
+        )
 
+        # fixing final weights
+        apply_final_compression(self.model)
+        
         self.model.eval()
         if self.save_path is not None:
             print("Loading best model state...")
             self.load_best_model()
 
         return self
+
+
 
     def fit_transform(self, X, m=None, X_val=None, m_val=None):
         """Trains and then transforms the provided data to the latent space.
@@ -446,8 +494,14 @@ class Autoencoder(BaseEstimator):
         self._load_model(self._model_path(epoch))
 
     def _load_model(self, model_path):
-        self.model.load_state_dict(torch.load(model_path,
-                                              map_location=self.device))
+        #self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        #self.model.load_state_dict(torch.load(model_path, map_location=self.device), strict=False)
+
+        state_dict = torch.load(model_path, map_location=self.device)
+        keys_to_delete = [k for k in state_dict.keys() if '.i' in k or '.f' in k or '.b' in k]
+        for k in keys_to_delete:
+            del state_dict[k] 
+        self.model.load_state_dict(state_dict, strict=False)
 
     def _save_model(self, model_path):
         torch.save(self.model.state_dict(), model_path)
@@ -460,6 +514,49 @@ class Autoencoder(BaseEstimator):
 
     def _model_path(self, epoch):
         return join(self.clsf_model_path, f"CLSF_epoch_{epoch}.par")
+    
+    def plot_results (self, score_background, score_signal):
+        fig, ax = plt.subplots(2, 2, figsize=(14, 10))
+
+        # Verlauf der verbleibenden Gewichte (Sparsity)
+        ax[0, 0].plot(self.history["keep_ratio"], label="Remaining Weights %", color='blue')
+        #ax[0, 0].set_title("Weight Pruning Progress")
+        ax[0, 0].set_xlabel("Epoch", fontsize=20)
+        ax[0, 0].set_ylabel("Ratio of Remaining Weights", fontsize=20)
+        ax[0, 0].legend()
+
+        # Validierungs-Loss (MSE)
+        ax[0, 1].plot(self.history["val_loss"], label="Val Loss (MSE)", color='orange')
+        #ax[0, 1].set_title("Reconstruction Error")
+        ax[0, 1].set_xlabel("Epoch", fontsize=20)
+        ax[0, 1].set_ylabel("Mean Squared Error (MSE)", fontsize=20)
+        ax[0, 1].legend()
+
+        # EBOPs (Hardware-Effizienz)
+        ax[1, 1].plot(self.history["ebops"], label="EBOPs", color='green')
+        #ax[1, 1].set_title("Effective Bit Operations")
+        ax[1, 1].set_xlabel("Epoch", fontsize=20)
+        ax[1, 1].set_ylabel("Effective Bit Operations", fontsize=20)
+        ax[1, 1].legend()
+
+        # Histogramm der Scores
+        ax[1, 0].hist(score_background, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[1, 0].hist(score_signal, bins=50, alpha=0.5, label='Sig', density=True)
+        #ax[1, 0].set_title("Score Distribution")
+        ax[1, 0].set_xlabel("Score", fontsize=20)
+        ax[1, 0].set_ylabel("Probability Density", fontsize=20)
+        ax[1, 0].set_xlim(0, 2)
+        ax[1, 0].legend()
+
+        for single_ax in ax.flat:
+            single_ax.tick_params(axis='both', labelsize=16)
+
+
+        plt.tight_layout()
+        plt.savefig(join(self.save_path, 'plots.png'))
+
+
+
 
     def plot_loss_histogram(self, score_bg, score_sig):
         """Erstellt ein Histogramm der Rekonstruktionsverluste."""
@@ -471,9 +568,9 @@ class Autoencoder(BaseEstimator):
 
         plt.xlabel('Reconstruction Loss (MSE)', fontsize=20)
         plt.ylabel('Probability Density', fontsize=20)
-        plt.legend(frameon=True, fontsize=18)
         plt.xticks(fontsize=18)
         plt.yticks(fontsize=18)
+        plt.legend(frameon=True, fontsize=18)
         plt.grid(alpha=0.3)
         plt.tight_layout()
         plt.savefig(join(self.save_path, 'loss_histogram.png'), dpi=300)
@@ -494,9 +591,10 @@ class Autoencoder(BaseEstimator):
         plt.ylim([0.0, 1.05])
         plt.xlabel('False Positive Rate (FPR)', fontsize=20)
         plt.ylabel('True Positive Rate (TPR)', fontsize=20)
-        plt.legend(loc="lower right", fontsize=18)
+        #plt.title('Anomaly Detection Performance', fontsize=14)
         plt.xticks(fontsize=18)
         plt.yticks(fontsize=18)
+        plt.legend(loc="lower right", fontsize=18)
         plt.grid(alpha=0.3)
         plt.savefig(join(self.save_path, 'ROC_Kurve.png'), dpi=300)
         plt.close()
@@ -511,10 +609,94 @@ class Autoencoder(BaseEstimator):
         plt.plot(val_losses, label='Validation', color='#ff7f0e', lw=2)
 
         #plt.yscale('log')
-        plt.xlabel('Epochs', fontsize=18)
-        plt.ylabel('Loss (MSE)', fontsize=18)
+        plt.xlabel('Epochs', fontsize=20)
+        plt.ylabel('Loss (MSE)', fontsize=20)
         #plt.title('Autoencoder Training Progress')
+        plt.xticks(fontsize=18)
+        plt.yticks(fontsize=18)
         plt.legend(fontsize=18)
         plt.grid(True, which="both", alpha=0.3)
         plt.savefig(join(self.save_path, 'learning_curve.png'), bbox_inches='tight')
         plt.close()
+
+
+    def export_to_hls(self, X_test_bkg, X_test_sig, backend='vitis', target='xcvu9p-flga2104-2L-e'):
+        print("Starting hls4ml conversion...")
+        
+        self.model.eval()
+        self.model.to("cpu")
+        output_dir = join(self.save_path, "hls_project")
+        os.makedirs(output_dir, exist_ok=True)
+        
+        
+        # hls4ml config
+        hls_config = config_from_pytorch_model(
+            self.model,
+            input_shape=(None, self.n_inputs), 
+            granularity='name',
+            backend=backend,
+            transpose_outputs=True
+        )
+        
+
+        # convert model
+        hls_model = convert_from_pytorch_model(
+            self.model,
+            io_type='io_parallel',
+            output_dir=output_dir,
+            backend=backend,
+            hls_config=hls_config,
+            part=target,
+        )
+        
+        hls_model.compile()
+        
+        # Background
+        X_bkg_c = np.ascontiguousarray(X_test_bkg).astype(np.float32)
+        p_hls_bkg = hls_model.predict(X_bkg_c)
+        score_bkg_hls = np.mean((X_bkg_c - p_hls_bkg)**2, axis=-1)
+        # Signal
+        X_sig_c = np.ascontiguousarray(X_test_sig).astype(np.float32)
+        p_hls_sig = hls_model.predict(X_sig_c)
+        score_sig_hls = np.mean((X_sig_c - p_hls_sig)**2, axis=-1)
+
+        # PyTorch Predictions
+        with torch.no_grad():
+            p_torch_bkg = self.model(torch.from_numpy(X_bkg_c)).numpy()
+            p_torch_sig = self.model(torch.from_numpy(X_sig_c)).numpy()
+            
+        score_bkg_torch = np.mean((X_bkg_c - p_torch_bkg)**2, axis=-1)
+        score_sig_torch = np.mean((X_sig_c - p_torch_sig)**2, axis=-1)
+
+        # Result Print
+        print(f"\nVergleich (Mean MSE):")
+        print(f"Bkg -> PyTorch: {np.mean(score_bkg_torch):.6f} | HLS (C-Sim): {np.mean(score_bkg_hls):.6f}")
+        print(f"Sig -> PyTorch: {np.mean(score_sig_torch):.6f} | HLS (C-Sim): {np.mean(score_sig_hls):.6f}")
+
+        # Plot
+        fig, ax = plt.subplots(1, 2, figsize=(12, 5)) # Höhe auf 5 reduziert, da 1x2 Grid
+        
+        # Plot für die Hardware-Ergebnisse (HLS)
+        ax[0].hist(score_bkg_hls, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[0].hist(score_sig_hls, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[0].set_xlim(0, 6)
+        ax[0].set_xlabel("Score", fontsize=12)
+        ax[0].set_ylabel("Probability Density", fontsize=12)
+        ax[0].legend()
+        ax[0].set_title("HLS Hardware Performance (C-Sim)")
+
+        # Plot für die Software-Ergebnisse (Torch)
+        ax[1].hist(score_bkg_torch, bins=50, alpha=0.5, label='Bkg', density=True)
+        ax[1].hist(score_sig_torch, bins=50, alpha=0.5, label='Sig', density=True)
+        ax[1].set_xlim(0, 6)
+        ax[1].set_xlabel("Score", fontsize=12)
+        ax[1].set_ylabel("Probability Density", fontsize=12)
+        ax[1].legend()
+        ax[1].set_title("PyTorch Software Performance")
+
+        plt.tight_layout()
+        plt.savefig(join(self.save_path, 'hls_comparison.png'))
+        plt.close() 
+
+        self.model.to(self.device)
+        return score_bkg_hls, score_sig_hls, score_bkg_torch, score_sig_torch
